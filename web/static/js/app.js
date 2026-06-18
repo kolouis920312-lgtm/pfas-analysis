@@ -400,8 +400,9 @@ function openManual() {
   const spec = state.current;
   if (!spec || !spec.manual) return;
   $("#manual-title").textContent = spec.name + " · 使用說明書";
-  $("#manual-beginner").innerHTML = renderMarkdown(spec.manual.beginner);
+  $("#manual-beginner").innerHTML = renderMarkdown(spec.manual.beginner) + exampleFigureHtml(spec);
   $("#manual-pro").innerHTML = renderMarkdown(spec.manual.pro);
+  $("#manual-glossary").innerHTML = renderMarkdown((state.meta && state.meta.glossary) || "");
   switchManualTab("beginner");
   $("#manual-modal").classList.remove("hidden");
 }
@@ -415,6 +416,18 @@ function switchManualTab(tab) {
     t.classList.toggle("active", t.dataset.tab === tab));
   $("#manual-beginner").classList.toggle("hidden", tab !== "beginner");
   $("#manual-pro").classList.toggle("hidden", tab !== "pro");
+  $("#manual-glossary").classList.toggle("hidden", tab !== "glossary");
+}
+
+// 「快速上手」底部附一張範例輸出圖（若該方法有縮圖）
+function exampleFigureHtml(spec) {
+  const url = state.meta && state.meta.examples && state.meta.examples[spec.key];
+  if (!url) return "";
+  return '<figure class="manual-example">'
+    + '<figcaption>▼ 範例輸出（用「示範資料」跑出來的樣子，點圖可放大）</figcaption>'
+    + '<a href="' + url + '" target="_blank" rel="noopener">'
+    + '<img src="' + url + '" alt="' + escapeHtml(spec.name) + ' 範例輸出"></a>'
+    + '</figure>';
 }
 
 // 輕量 Markdown 渲染（## 標題 / - 清單 / 1. 編號 / **粗體** / `碼` / > 重點），無外部相依

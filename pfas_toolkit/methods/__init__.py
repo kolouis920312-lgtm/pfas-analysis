@@ -5,7 +5,7 @@
 from . import (pca, kmeans, hca, som, nonparam,
                xgboost_reg, bdl, coda, ml_drivers,
                trajectory, pmf, partitioning, lrtp)
-from ._manuals import MANUALS
+from ._manuals import MANUALS, GLOSSARY
 
 # 顯示順序（後 4 個為大氣長程傳輸專用：受體模型 / 來源解析 / 程序模型）
 _MODULES = [pca, kmeans, hca, som, nonparam, xgboost_reg, bdl, coda, ml_drivers,

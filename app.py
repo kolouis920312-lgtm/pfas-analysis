@@ -47,6 +47,7 @@ from pfas_toolkit.core import theme as thememod
 # ───────────────────────────────────────── 基本設定
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")        # 既有的 CSV 範本
+EXAMPLES_DIR = os.path.join(BASE_DIR, "web", "static", "examples")  # 說明書範例縮圖
 IMAGE_FORMATS = ["png", "svg", "pdf", "jpg"]
 MAX_UPLOAD_MB = 32
 
@@ -104,6 +105,18 @@ def spec_to_dict(s):
 def report_to_dict(rep):
     return {"ok": rep.ok, "errors": rep.errors, "warnings": rep.warnings,
             "info": rep.info, "text": rep.as_text()}
+
+
+def example_urls():
+    """掃 web/static/examples，回傳 {方法key: 縮圖網址}（說明書「快速上手」顯示範例輸出用）。"""
+    out = {}
+    try:
+        for fn in sorted(os.listdir(EXAMPLES_DIR)):
+            if fn.lower().endswith(".png"):
+                out[os.path.splitext(fn)[0]] = f"/static/examples/{fn}"
+    except Exception:
+        pass
+    return out
 
 
 # ───────────────────────────────────────── 工具函式
@@ -228,6 +241,8 @@ def healthz():
 def meta():
     return jsonify({
         "methods": [spec_to_dict(s) for s in SPECS],
+        "glossary": methods.GLOSSARY,
+        "examples": example_urls(),
         "theme_default": dict(thememod.DEFAULT_THEME),
         "fonts": list(thememod.FONT_CHOICES),
         "cmap_sequential": list(thememod.SEQUENTIAL_CMAPS),

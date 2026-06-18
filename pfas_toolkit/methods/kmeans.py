@@ -40,6 +40,7 @@ def run(df, params, ctx):
         ctx.log(f"只使用前 {use} 個維度分群。")
     n_clusters = int(params.get("n_clusters", 3))
     max_k = int(params.get("max_k", 10))
+    seed = int(params.get("random_seed", 42) or 42)
     if n_clusters >= X.shape[0]:
         raise ValueError(f"群數 {n_clusters} 不可 >= 樣本數 {X.shape[0]}。")
     primary = ctx.color("primary", "#4682b4")
@@ -51,7 +52,7 @@ def run(df, params, ctx):
     ks = list(range(2, maxk + 1))
     inertia, sil, ch, db = [], [], [], []
     for k in ks:
-        km = KMeans(n_clusters=k, n_init=10, random_state=42)
+        km = KMeans(n_clusters=k, n_init=10, random_state=seed)
         lab = km.fit_predict(X)
         inertia.append(km.inertia_); sil.append(silhouette_score(X, lab))
         ch.append(calinski_harabasz_score(X, lab)); db.append(davies_bouldin_score(X, lab))
@@ -76,7 +77,7 @@ def run(df, params, ctx):
                                  "Calinski_Harabasz": ch, "Davies_Bouldin": db}),
                    "kmeans_metrics_table", index=False)
 
-    km = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
+    km = KMeans(n_clusters=n_clusters, n_init=10, random_state=seed)
     labels = km.fit_predict(X)
     if X.shape[1] >= 2:
         fig, ax = plt.subplots(figsize=(8, 6))
@@ -125,6 +126,8 @@ SPEC = MethodSpec(
         ParamSpec("max_k", "掃描的最大群數", "int", default=10, minimum=2),
         ParamSpec("n_clusters", "最終分群數", "int", default=3, minimum=2,
                   help="先看指標圖再決定。"),
+        ParamSpec("random_seed", "亂數種子", "int", default=42, minimum=0,
+                  help="換個數字可檢查分群結果穩不穩定。"),
     ],
     schema=InputSchema(min_rows=4, min_numeric_cols=1, id_col_param="id_col"),
     template_columns=["sample_id", "PC1", "PC2", "PC3", "…"],

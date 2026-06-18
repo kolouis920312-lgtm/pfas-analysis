@@ -34,7 +34,7 @@ def bh_fdr(pvals):
     return out
 
 
-def mann_kendall(x, norm):
+def mann_kendall(x, norm, alpha=0.05):
     x = np.asarray(x, float)
     x = x[~np.isnan(x)]
     n = len(x)
@@ -48,7 +48,7 @@ def mann_kendall(x, norm):
         return dict(n=n, S=int(S), Z=np.nan, p=np.nan, trend="n/a")
     Z = (S - 1) / np.sqrt(var) if S > 0 else (S + 1) / np.sqrt(var) if S < 0 else 0.0
     p = 2 * (1 - norm.cdf(abs(Z)))
-    trend = "上升" if (p < 0.05 and S > 0) else "下降" if (p < 0.05 and S < 0) else "無顯著趨勢"
+    trend = "上升" if (p < alpha and S > 0) else "下降" if (p < alpha and S < 0) else "無顯著趨勢"
     return dict(n=n, S=int(S), Z=round(float(Z), 3), p=round(float(p), 4), trend=trend)
 
 
@@ -67,6 +67,7 @@ def run(df, params, ctx):
     id_col = params.get("id_col") or None
     group_col = params.get("group_col") or None
     time_col = params.get("time_col") or None
+    alpha = float(params.get("alpha", 0.05) or 0.05)
     if group_col in ("(無)", ""):
         group_col = None
     if time_col in ("(無)", ""):
@@ -75,7 +76,7 @@ def run(df, params, ctx):
     species = [c for c in df.columns if c not in drop and pd.api.types.is_numeric_dtype(df[c])]
     if len(species) < 1:
         raise ValueError("找不到數值變數欄。")
-    ctx.log(f"數值變數 {len(species)} 欄；group={group_col}；time={time_col}")
+    ctx.log(f"數值變數 {len(species)} 欄；group={group_col}；time={time_col}；α={alpha:g}")
     cmap_div = ctx.color("cmap_diverging", "RdBu_r")
     did = []
 
@@ -103,7 +104,7 @@ def run(df, params, ctx):
         if rows:
             gt = pd.DataFrame(rows)
             gt["p_fdr"] = bh_fdr(gt["p"].values)
-            gt["sig"] = np.where(gt["p_fdr"] < 0.05, "*", "")
+            gt["sig"] = np.where(gt["p_fdr"] < alpha, "*", "")
             gt["p"] = gt["p"].round(4); gt["p_fdr"] = gt["p_fdr"].round(4)
             ctx.save_table(gt, "group_tests", index=False)
             ctx.log(f"群差異 by {group_col}（groups={labels}）→ group_tests.csv")
@@ -116,7 +117,7 @@ def run(df, params, ctx):
         tnum = (pd.to_datetime(torder["_t"]) - pd.to_datetime(torder["_t"]).min()).dt.days.values
         rows = []
         for s in species:
-            mk = mann_kendall(torder[s].values, norm)
+            mk = mann_kendall(torder[s].values, norm, alpha)
             mk.update(variable=s, sen_slope_per_day=round(sen_slope(torder[s].values, tnum), 5))
             rows.append(mk)
         tt = pd.DataFrame(rows)[["variable", "n", "S", "Z", "p", "sen_slope_per_day", "trend"]]
@@ -154,10 +155,10 @@ def run(df, params, ctx):
         ax.set_yticks(range(len(cols))); ax.set_yticklabels(cols, fontsize=7)
         for i in range(len(cols)):
             for j in range(len(cols)):
-                if i != j and qmat.iloc[i, j] < 0.05:
+                if i != j and qmat.iloc[i, j] < alpha:
                     ax.text(j, i, "*", ha="center", va="center", color="black", fontsize=8)
         fig.colorbar(im, fraction=0.046)
-        ax.set_title("Spearman ρ  (* = FDR<0.05)")
+        ax.set_title(f"Spearman ρ  (* = FDR<{alpha:g})")
         fig.tight_layout(); ctx.save_fig(fig, "spearman_heatmap")
 
     if not did:
@@ -175,6 +176,8 @@ SPEC = MethodSpec(
                   help="如 season / site；2 群用 Mann-Whitney，>2 群用 Kruskal-Wallis。"),
         ParamSpec("time_col", "時間欄（做趨勢，可空）", "column", default="date", optional=True,
                   help="如 date；做 Mann-Kendall 趨勢與 Sen's slope。"),
+        ParamSpec("alpha", "顯著水準 α", "float", default=0.05, minimum=0.0001, maximum=0.5,
+                  help="判定顯著的門檻（校正後 p 小於此值才標 *）。預設 0.05；要更嚴格可填 0.01。"),
     ],
     schema=InputSchema(min_rows=4, min_numeric_cols=1, id_col_param="id_col"),
     template_columns=["sample_id", "season", "date", "PFOA", "PFOS", "…"],

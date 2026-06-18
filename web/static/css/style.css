@@ -249,6 +249,14 @@ input[type="color"] {
   border-radius: 6px; color: #7c5310;
 }
 .markdown strong { color: var(--ink); }
+.markdown img { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+
+/* 說明書「快速上手」底部的範例輸出圖 */
+.manual-example { margin: 20px 0 4px; }
+.manual-example figcaption { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.manual-example img {
+  max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; display: block;
+}
 
 /* RWD */
 @media (max-width: 900px) {

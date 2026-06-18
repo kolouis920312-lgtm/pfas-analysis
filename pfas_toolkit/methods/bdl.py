@@ -75,6 +75,7 @@ def run(df, params, ctx):
     if X.shape[1] < 1:
         raise ValueError("沒有可用的數值欄。")
     error_frac = float(params.get("error_frac", 0.10))
+    mdl_override = float(params.get("mdl_override", 0) or 0)
     cmap_seq = ctx.color("cmap_sequential", "Greens")
 
     mdl = {}
@@ -82,7 +83,11 @@ def run(df, params, ctx):
         pos = X[c][X[c] > 0]
         mdl[c] = pos.min() if len(pos) else 1.0
     mdl = pd.Series(mdl)
-    ctx.log("MDL 以各物種最小正值估計（正式分析請提供真實 MDL）。")
+    if mdl_override > 0:
+        mdl = pd.Series(mdl_override, index=X.columns)
+        ctx.log(f"使用固定 MDL = {mdl_override:g}（套用到所有物種）。")
+    else:
+        ctx.log("MDL 以各物種最小正值估計（正式分析請提供真實 MDL）。")
 
     det = pd.concat([(X > 0).sum().rename("n_detected"),
                      (X > 0).mean().rename("detection_freq")], axis=1)
@@ -133,6 +138,9 @@ SPEC = MethodSpec(
         ParamSpec("id_col", "ID 欄（可空）", "column", default="sample_id", optional=True),
         ParamSpec("error_frac", "相對分析誤差（不確定度用）", "float", default=0.10,
                   minimum=0.0, maximum=1.0),
+        ParamSpec("mdl_override", "固定 MDL（0=自動用各物種最小正值）", "float", default=0.0,
+                  minimum=0.0,
+                  help="填 > 0 則所有物種改用這個方法偵測極限；正式分析建議填實驗室真實 MDL。"),
     ],
     schema=InputSchema(min_rows=3, min_numeric_cols=1, id_col_param="id_col", check_bdl=True,
                        note="BDL 請以 0 或空白表示；勿用 ND/<MDL 文字。"),
