@@ -24,6 +24,7 @@
       <h2 class="panel-title">分析方法</h2>
       <ul id="method-list" class="method-list"></ul>
       <p id="method-summary" class="method-summary"></p>
+      <button id="manual-btn" class="btn ghost manual-open-btn hidden">📖 使用說明書</button>
     </aside>
 
     <!-- 中：設定 -->
@@ -122,6 +123,25 @@
       </div>
     </div>
   </section>
+
+  <!-- 使用說明書（彈出小視窗：快速上手 / 原理與算法 兩分頁） -->
+  <div id="manual-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="manual-title">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2 id="manual-title">使用說明書</h2>
+        <button class="modal-close" id="manual-close" aria-label="關閉說明書" data-close>×</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="modal-tab active" data-tab="beginner">🐣 快速上手</button>
+        <button class="modal-tab" data-tab="pro">🔬 原理與算法</button>
+      </div>
+      <div class="modal-body">
+        <div id="manual-beginner" class="manual-pane markdown"></div>
+        <div id="manual-pro" class="manual-pane markdown hidden"></div>
+      </div>
+    </div>
+  </div>
 
   <div id="overlay" class="overlay hidden">
     <div class="spinner"></div>

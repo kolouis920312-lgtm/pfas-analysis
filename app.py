@@ -95,6 +95,7 @@ def spec_to_dict(s):
             "note": s.schema.note,
         },
         "params": [param_to_dict(p) for p in s.params],
+        "manual": dict(s.manual) if s.manual else {},
         "has_template": os.path.exists(
             os.path.join(TEMPLATES_DIR, f"{s.key}_template.csv")),
     }

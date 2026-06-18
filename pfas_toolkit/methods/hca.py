@@ -8,7 +8,7 @@ import pandas as pd
 
 from ..core.spec import MethodSpec, ParamSpec, InputSchema
 from ..core.theme import get_plt
-from ..core.prep import numeric_frame
+from ..core.prep import numeric_frame, cluster_members_table
 
 
 def make_demo(n_samples=200, n_features=8, n_groups=3, seed=42):
@@ -33,6 +33,7 @@ def run(df, params, ctx):
     method = params.get("linkage_method", "ward")
     max_clusters = int(params.get("max_clusters", 10))
     n_clusters = int(params.get("n_clusters", 4))
+    dist_thr = float(params.get("distance_threshold", 0) or 0)
     primary = ctx.color("primary", "#4682b4")
     accent = ctx.color("accent", "#ff6347")
     cmap_cat = ctx.color("cmap_categorical", "tab10")
@@ -48,13 +49,26 @@ def run(df, params, ctx):
     Xs = StandardScaler().fit_transform(X)
     Z = linkage(Xs, method=method)
 
+    # 決定切群方式：距離門檻 > 0 → 用距離切（距離低於此值算同一組）；否則用群數切
+    use_dist = dist_thr > 0
+    if use_dist:
+        labels = fcluster(Z, t=dist_thr, criterion="distance")
+        ct = dist_thr
+        n_eff = int(len(np.unique(labels)))
+        ctx.log(f"以距離門檻 {dist_thr:g} 切群（距離低於此值者算同一組）→ 得到 {n_eff} 群。")
+    else:
+        labels = fcluster(Z, t=n_clusters, criterion="maxclust")
+        ct = Z[-(n_clusters - 1), 2] if (len(Z) >= n_clusters > 1) else 0
+        n_eff = n_clusters
+
     # 樹狀圖
     fig, ax = plt.subplots(figsize=(14, 6))
-    ct = Z[-(n_clusters - 1), 2] if (len(Z) >= n_clusters > 1) else 0
     dendrogram(Z, truncate_mode="lastp", p=30, leaf_rotation=90, leaf_font_size=9,
                show_contracted=True, color_threshold=ct, ax=ax)
-    if n_clusters > 1:
-        ax.axhline(ct, color=accent, ls="--", alpha=0.7, label=f"切成 {n_clusters} 群")
+    if ct > 0:
+        cut_label = (f"距離門檻 {dist_thr:g}（{n_eff} 群）" if use_dist
+                     else f"切成 {n_clusters} 群")
+        ax.axhline(ct, color=accent, ls="--", alpha=0.7, label=cut_label)
         ax.legend()
     ax.set_title(f"HCA 樹狀圖 (method={method})")
     ax.set_xlabel("樣本 / 群"); ax.set_ylabel("距離")
@@ -81,7 +95,6 @@ def run(df, params, ctx):
         ctx.log(f"Silhouette 建議群數 = {ks[int(np.nanargmax(sil))]}")
         ctx.log(f"Calinski-Harabasz 建議群數 = {ks[int(np.nanargmax(ch))]}")
 
-    labels = fcluster(Z, t=n_clusters, criterion="maxclust")
     if len(np.unique(labels)) >= 2:
         ctx.log(f"最終 Silhouette={silhouette_score(Xs, labels):.4f}；"
                 f"Calinski-Harabasz={calinski_harabasz_score(Xs, labels):.4f}")
@@ -99,10 +112,19 @@ def run(df, params, ctx):
 
     out = X.copy(); out["HCA_Cluster"] = labels
     ctx.save_table(out, "hca_results")
+    members = cluster_members_table(X.index, labels)
+    ctx.save_table(members, "hca_cluster_members", index=False)
     counts = pd.Series(labels).value_counts().sort_index()
     ctx.log("各群樣本數：" + ", ".join(f"群{k}={v}" for k, v in counts.items()))
-    return ctx.result(summary=f"HCA 完成（{method}，{n_clusters} 群）。"
-                              "hca_results.csv 的 HCA_Cluster 欄可當回歸類別特徵。")
+    for _, r in members.iterrows():
+        mtxt = str(r["members"])
+        if len(mtxt) > 160:
+            mtxt = mtxt[:160] + " …"
+        ctx.log(f"群{int(r['Cluster'])}（{int(r['n'])} 筆）：{mtxt}")
+    cut_desc = (f"距離門檻 {dist_thr:g} → {n_eff} 群" if use_dist else f"{n_clusters} 群")
+    return ctx.result(summary=f"HCA 完成（{method}，{cut_desc}）。"
+                              "hca_results.csv 的 HCA_Cluster 欄可當回歸類別特徵；"
+                              "hca_cluster_members.csv 列出每群各有哪些樣本。")
 
 
 SPEC = MethodSpec(
@@ -116,7 +138,10 @@ SPEC = MethodSpec(
                   choices=["ward", "complete", "average", "single"]),
         ParamSpec("max_clusters", "評估的最大群數", "int", default=10, minimum=2),
         ParamSpec("n_clusters", "最終切割群數", "int", default=4, minimum=2,
-                  help="先看樹狀圖與評估圖再決定。"),
+                  help="先看樹狀圖與評估圖再決定。距離門檻 > 0 時此項會被忽略。"),
+        ParamSpec("distance_threshold", "距離門檻（0=用群數切）", "float", default=0.0,
+                  minimum=0.0,
+                  help="填 > 0 改用距離切群：樹狀圖在此高度橫切，距離低於此值的樣本算同一組，群數由資料自動決定。"),
     ],
     schema=InputSchema(min_rows=4, min_numeric_cols=2, id_col_param="id_col"),
     template_columns=["sample_id", "feature_1", "feature_2", "feature_3", "…"],

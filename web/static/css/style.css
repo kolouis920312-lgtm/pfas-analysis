@@ -194,6 +194,62 @@ input[type="color"] {
 .footer { text-align: center; color: var(--muted); font-size: 13px; padding: 20px; }
 .hidden { display: none !important; }
 
+/* ── 使用說明書按鈕 ── */
+.manual-open-btn { margin: 14px 4px 0; width: 100%; justify-content: center; }
+
+/* ── 說明書小視窗 ── */
+.modal {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.modal-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, .55); }
+.modal-box {
+  position: relative; background: var(--card); border-radius: var(--radius);
+  box-shadow: 0 20px 60px rgba(16, 24, 40, .35);
+  width: min(720px, 100%); max-height: 86vh; display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 15px 20px;
+  background: linear-gradient(120deg, var(--primary), var(--primary-dark)); color: #fff;
+}
+.modal-head h2 { margin: 0; font-size: 18px; }
+.modal-close {
+  background: transparent; border: none; color: #fff; font-size: 26px; line-height: 1;
+  cursor: pointer; padding: 0 6px; border-radius: 8px; transition: background .12s;
+}
+.modal-close:hover { background: rgba(255, 255, 255, .2); }
+.modal-tabs { display: flex; gap: 4px; padding: 10px 16px 0; border-bottom: 1px solid var(--line); }
+.modal-tab {
+  padding: 9px 16px; border: 1px solid transparent; border-bottom: none; background: transparent;
+  font-size: 14px; cursor: pointer; color: var(--muted); border-radius: 9px 9px 0 0; font-family: inherit;
+}
+.modal-tab:hover { background: #f1f5f9; }
+.modal-tab.active { color: var(--primary-dark); font-weight: 600; background: #eaf2fa; }
+.modal-body { padding: 18px 22px; overflow-y: auto; }
+
+/* ── 說明書內文（輕量 Markdown 渲染） ── */
+.markdown { font-size: 14.5px; color: var(--ink); line-height: 1.72; }
+.markdown h4 {
+  margin: 18px 0 8px; font-size: 15.5px; color: var(--primary-dark);
+  padding-left: 10px; border-left: 3px solid var(--primary);
+}
+.markdown h4:first-child { margin-top: 0; }
+.markdown h5 { margin: 14px 0 6px; font-size: 14px; color: var(--ink); }
+.markdown p { margin: 8px 0; }
+.markdown ul, .markdown ol { margin: 8px 0; padding-left: 22px; }
+.markdown li { margin: 4px 0; }
+.markdown code {
+  background: #eef2f7; color: #b3306b; padding: 1px 6px; border-radius: 5px;
+  font-family: "Consolas", "Menlo", monospace; font-size: 13px;
+}
+.markdown blockquote {
+  margin: 10px 0; padding: 10px 14px; background: #fff7ed; border-left: 4px solid var(--warn);
+  border-radius: 6px; color: #7c5310;
+}
+.markdown strong { color: var(--ink); }
+
 /* RWD */
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
@@ -202,4 +258,6 @@ input[type="color"] {
   .theme-grid { grid-template-columns: 1fr 1fr; }
   .param-row { grid-template-columns: 1fr; gap: 6px; }
   .param-label { padding-top: 0; }
+  .modal { padding: 12px; }
+  .modal-body { padding: 16px; }
 }

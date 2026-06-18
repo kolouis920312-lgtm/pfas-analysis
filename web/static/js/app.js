@@ -42,6 +42,16 @@ function bindEvents() {
   $("#demo-btn").addEventListener("click", onDemo);
   $("#run-btn").addEventListener("click", onRun);
   $("#reset-theme-btn").addEventListener("click", resetTheme);
+  // 說明書小視窗
+  $("#manual-btn").addEventListener("click", openManual);
+  $("#manual-modal").addEventListener("click", (e) => {
+    if (e.target.dataset && e.target.dataset.close !== undefined) closeManual();
+  });
+  document.querySelectorAll(".modal-tab").forEach((t) =>
+    t.addEventListener("click", () => switchManualTab(t.dataset.tab)));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeManual();
+  });
   // 主題/輸出變更 → 存到 localStorage
   ["font", "primary", "accent", "cmap_sequential", "cmap_diverging",
    "cmap_categorical", "image_format", "dpi"].forEach((id) => {
@@ -69,6 +79,10 @@ function selectMethod(key) {
   document.querySelectorAll("#method-list li").forEach((li) =>
     li.classList.toggle("active", li.dataset.key === key));
   $("#method-summary").textContent = spec.summary;
+
+  // 說明書按鈕（有內容才顯示）
+  const hasManual = spec.manual && (spec.manual.beginner || spec.manual.pro);
+  $("#manual-btn").classList.toggle("hidden", !hasManual);
 
   // 範本下載連結
   const tl = $("#template-link");
@@ -379,6 +393,61 @@ function renderResults(res) {
     (res.log || "") + "\n\n【摘要】\n" + (res.summary || "");
 
   $("#results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ───────────────────────────────── 使用說明書（小視窗）
+function openManual() {
+  const spec = state.current;
+  if (!spec || !spec.manual) return;
+  $("#manual-title").textContent = spec.name + " · 使用說明書";
+  $("#manual-beginner").innerHTML = renderMarkdown(spec.manual.beginner);
+  $("#manual-pro").innerHTML = renderMarkdown(spec.manual.pro);
+  switchManualTab("beginner");
+  $("#manual-modal").classList.remove("hidden");
+}
+
+function closeManual() {
+  $("#manual-modal").classList.add("hidden");
+}
+
+function switchManualTab(tab) {
+  document.querySelectorAll(".modal-tab").forEach((t) =>
+    t.classList.toggle("active", t.dataset.tab === tab));
+  $("#manual-beginner").classList.toggle("hidden", tab !== "beginner");
+  $("#manual-pro").classList.toggle("hidden", tab !== "pro");
+}
+
+// 輕量 Markdown 渲染（## 標題 / - 清單 / 1. 編號 / **粗體** / `碼` / > 重點），無外部相依
+function renderMarkdown(md) {
+  if (!md || !md.trim()) return "<p class='hint'>（此方法尚無說明內容）</p>";
+  const escAll = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const inline = (s) => escAll(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  const lines = md.replace(/\r\n/g, "\n").split("\n");
+  let html = "", para = [], inUl = false, inOl = false;
+  const flushPara = () => { if (para.length) { html += "<p>" + inline(para.join(" ")) + "</p>"; para = []; } };
+  const closeLists = () => {
+    if (inUl) { html += "</ul>"; inUl = false; }
+    if (inOl) { html += "</ol>"; inOl = false; }
+  };
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, "");
+    if (!line.trim()) { flushPara(); closeLists(); continue; }
+    let m;
+    if ((m = line.match(/^###\s+(.*)/))) { flushPara(); closeLists(); html += "<h5>" + inline(m[1]) + "</h5>"; }
+    else if ((m = line.match(/^##\s+(.*)/))) { flushPara(); closeLists(); html += "<h4>" + inline(m[1]) + "</h4>"; }
+    else if ((m = line.match(/^>\s?(.*)/))) { flushPara(); closeLists(); html += "<blockquote>" + inline(m[1]) + "</blockquote>"; }
+    else if ((m = line.match(/^\s*[-•]\s+(.*)/))) {
+      flushPara(); if (inOl) { html += "</ol>"; inOl = false; }
+      if (!inUl) { html += "<ul>"; inUl = true; } html += "<li>" + inline(m[1]) + "</li>";
+    } else if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) {
+      flushPara(); if (inUl) { html += "</ul>"; inUl = false; }
+      if (!inOl) { html += "<ol>"; inOl = true; } html += "<li>" + inline(m[1]) + "</li>";
+    } else { para.push(line.trim()); }
+  }
+  flushPara(); closeLists();
+  return html;
 }
 
 // ───────────────────────────────── 主題 / 輸出控制

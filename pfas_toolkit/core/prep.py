@@ -24,3 +24,16 @@ def numeric_frame(df: pd.DataFrame, ctx, id_col=None, drop_cols=()) -> pd.DataFr
         ctx.log(f"⚠ {nan} 個缺值 → 以各欄中位數補值")
         X = X.fillna(X.median(numeric_only=True))
     return X
+
+
+def cluster_members_table(index, labels) -> pd.DataFrame:
+    """把分群結果整理成「每群有哪些樣本」的清單表（給使用者看『哪幾筆同一組』）。
+
+    回傳欄位：Cluster（群編號）、n（該群樣本數）、members（樣本 ID，逗號分隔）。
+    """
+    s = pd.Series(list(labels), index=[str(i) for i in index])
+    rows = []
+    for c in sorted(pd.unique(s.values)):
+        ids = [i for i, v in zip(s.index, s.values) if v == c]
+        rows.append({"Cluster": int(c), "n": len(ids), "members": ", ".join(ids)})
+    return pd.DataFrame(rows)

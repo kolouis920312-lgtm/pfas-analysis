@@ -9,7 +9,7 @@ import pandas as pd
 
 from ..core.spec import MethodSpec, ParamSpec, InputSchema
 from ..core.theme import get_plt
-from ..core.prep import numeric_frame
+from ..core.prep import numeric_frame, cluster_members_table
 
 
 def make_demo(n_samples=200, n_pcs=5, n_groups=3, seed=42):
@@ -93,6 +93,8 @@ def run(df, params, ctx):
 
     out = X.copy(); out["KMeans_Cluster"] = labels
     ctx.save_table(out, "kmeans_labels")
+    members = cluster_members_table(X.index, labels)
+    ctx.save_table(members, "kmeans_cluster_members", index=False)
     sil_f = silhouette_score(X, labels)
     ch_f = calinski_harabasz_score(X, labels)
     db_f = davies_bouldin_score(X, labels)
@@ -103,8 +105,14 @@ def run(df, params, ctx):
                    "kmeans_summary", index=False)
     counts = pd.Series(labels).value_counts().sort_index()
     ctx.log("各群樣本數：" + ", ".join(f"群{k}={v}" for k, v in counts.items()))
+    for _, r in members.iterrows():
+        mtxt = str(r["members"])
+        if len(mtxt) > 160:
+            mtxt = mtxt[:160] + " …"
+        ctx.log(f"群{int(r['Cluster'])}（{int(r['n'])} 筆）：{mtxt}")
     return ctx.result(summary=f"K-means 完成（k={n_clusters}）。Silhouette={sil_f:.3f}。"
-                              "kmeans_labels.csv 的 KMeans_Cluster 欄可當回歸類別特徵。")
+                              "kmeans_labels.csv 標出每筆的群；"
+                              "kmeans_cluster_members.csv 列出每群各有哪些樣本。")
 
 
 SPEC = MethodSpec(

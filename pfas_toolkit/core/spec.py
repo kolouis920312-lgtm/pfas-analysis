@@ -55,6 +55,7 @@ class MethodSpec:
     uses_colors: list = field(default_factory=list)   # 用到哪些顏色角色（GUI 提示用）
     run: Optional[Callable] = None          # run(df, params, ctx) -> RunResult
     make_demo: Optional[Callable] = None    # make_demo() -> DataFrame（示範資料）
+    manual: dict = field(default_factory=dict)   # 使用說明書 {"beginner": 白話, "pro": 原理算法}
 
     def default_params(self) -> dict:
         return {p.key: p.default for p in self.params}
