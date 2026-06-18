@@ -1,0 +1,16 @@
+{
+  "theme": {
+    "font_family": "Microsoft JhengHei",
+    "primary": "#4682b4",
+    "accent": "#ff6347",
+    "cmap_sequential": "viridis",
+    "cmap_diverging": "RdBu_r",
+    "cmap_categorical": "tab10"
+  },
+  "output": {
+    "output_dir": "C:\\Users\\user\\Desktop\\資料分析\\outputs",
+    "image_format": "png",
+    "dpi": 150
+  },
+  "methods": {}
+}

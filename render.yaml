@@ -1,0 +1,14 @@
+# Render.com 一鍵部署設定（用 Dockerfile 建置）
+# 用法：把此專案推到 GitHub → 在 Render 點 "New + > Blueprint" → 選這個 repo
+services:
+  - type: web
+    name: pfas-analysis
+    runtime: docker
+    plan: free            # 免費方案；要更快可改 starter
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: MPLBACKEND
+        value: Agg

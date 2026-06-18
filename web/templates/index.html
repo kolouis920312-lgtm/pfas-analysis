@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PFAS 資料分析工具</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🧪</span>
+      <div>
+        <h1>PFAS 資料分析工具</h1>
+        <p class="tagline">選方法 → 上傳資料 → 驗證 → 執行，全程不必改程式碼</p>
+      </div>
+    </div>
+    <a class="ghost-btn" href="https://www.google.com/search?q=PFAS" target="_blank" rel="noopener">關於 PFAS</a>
+  </header>
+
+  <main class="layout">
+    <!-- 左：方法清單 -->
+    <aside class="sidebar">
+      <h2 class="panel-title">分析方法</h2>
+      <ul id="method-list" class="method-list"></ul>
+      <p id="method-summary" class="method-summary"></p>
+    </aside>
+
+    <!-- 中：設定 -->
+    <section class="content">
+      <!-- ① 資料來源 -->
+      <div class="card">
+        <h3 class="card-title"><span class="num">①</span> 資料來源</h3>
+        <div class="data-source">
+          <label class="file-btn">
+            選擇 CSV…
+            <input type="file" id="file-input" accept=".csv" hidden>
+          </label>
+          <button class="btn" id="demo-btn">用示範資料</button>
+          <a class="btn ghost" id="template-link" href="#" target="_blank">下載此方法範本</a>
+          <span id="data-label" class="data-label">（尚未選擇資料）</span>
+        </div>
+        <div id="data-preview" class="data-preview hidden"></div>
+      </div>
+
+      <!-- ② 格式驗證 -->
+      <div class="card">
+        <h3 class="card-title"><span class="num">②</span> 格式驗證</h3>
+        <pre id="validation" class="validation">請先選擇 CSV 或按「用示範資料」。</pre>
+      </div>
+
+      <!-- ③ 參數 -->
+      <div class="card">
+        <h3 class="card-title"><span class="num">③</span> 參數（不必改程式碼）</h3>
+        <div id="params" class="params"></div>
+      </div>
+
+      <!-- ④ 顏色與字型 -->
+      <div class="card">
+        <h3 class="card-title"><span class="num">④</span> 顏色與字型（改一次、全部生效）</h3>
+        <div class="theme-grid">
+          <label>字型
+            <input list="font-list" id="font" type="text">
+            <datalist id="font-list"></datalist>
+          </label>
+          <label>主色
+            <input id="primary" type="color">
+          </label>
+          <label>強調色
+            <input id="accent" type="color">
+          </label>
+          <label>連續色階
+            <select id="cmap_sequential"></select>
+          </label>
+          <label>分散色階
+            <select id="cmap_diverging"></select>
+          </label>
+          <label>分類色盤
+            <select id="cmap_categorical"></select>
+          </label>
+        </div>
+        <p class="hint">連續→熱圖/SOM；分散→相關；分類→分群/站別</p>
+      </div>
+
+      <!-- ⑤ 輸出設定 -->
+      <div class="card">
+        <h3 class="card-title"><span class="num">⑤</span> 輸出設定</h3>
+        <div class="output-grid">
+          <label>圖檔格式
+            <select id="image_format"></select>
+          </label>
+          <label>dpi
+            <input id="dpi" type="number" min="50" max="600" step="10" value="150">
+          </label>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary big" id="run-btn">▶ 執行分析</button>
+        <button class="btn ghost" id="reset-theme-btn">還原預設顏色</button>
+        <span id="status" class="status">就緒</span>
+      </div>
+    </section>
+  </main>
+
+  <!-- 結果 -->
+  <section id="results" class="results hidden">
+    <div class="results-head">
+      <h2>執行結果</h2>
+      <span id="results-meta" class="results-meta"></span>
+    </div>
+    <div class="results-body">
+      <div class="result-col">
+        <h3>圖像預覽</h3>
+        <div id="previews" class="previews"></div>
+        <h3>下載</h3>
+        <div id="downloads" class="downloads"></div>
+      </div>
+      <div class="result-col">
+        <h3>執行紀錄 / 摘要</h3>
+        <pre id="log" class="log"></pre>
+      </div>
+    </div>
+  </section>
+
+  <div id="overlay" class="overlay hidden">
+    <div class="spinner"></div>
+    <p id="overlay-text">執行中…</p>
+  </div>
+
+  <footer class="footer">
+    PFAS 資料分析工具 · 由 pfas_toolkit 驅動 · 網站版
+  </footer>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
