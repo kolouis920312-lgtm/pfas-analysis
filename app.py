@@ -80,6 +80,7 @@ def param_to_dict(p):
         "default": p.default, "choices": list(p.choices),
         "minimum": p.minimum, "maximum": p.maximum,
         "help": p.help, "optional": p.optional,
+        "source_col": getattr(p, "source_col", None),
     }
 
 
@@ -145,6 +146,23 @@ def df_preview(df, n=8):
     }
 
 
+def value_options(df, max_card=80):
+    """各「低基數」欄位的相異值（給站別/季節等『多選值』參數的核取清單用）。
+
+    只回傳相異值在 1~max_card 之間的欄（避免把純數值/高基數欄也列進來）。
+    """
+    out = {}
+    for c in df.columns:
+        try:
+            vals = df[c].dropna().astype(str).str.strip()
+            uniq = sorted({v for v in vals if v != ""})
+            if 1 <= len(uniq) <= max_card:
+                out[str(c)] = uniq
+        except Exception:
+            pass
+    return out
+
+
 def _json_safe_rows(head):
     import json as _json
     return _json.loads(head.to_json(orient="values", date_format="iso"))
@@ -185,6 +203,9 @@ def coerce_params(spec, raw):
         elif ps.kind == "bool":
             p[ps.key] = (val if isinstance(val, bool)
                          else str(val).strip().lower() in ("1", "true", "on", "yes"))
+        elif ps.kind in ("columns", "values"):
+            from pfas_toolkit.core.prep import as_list
+            p[ps.key] = as_list(val)
         else:  # choice / column / text
             s = "" if val is None else str(val)
             p[ps.key] = "" if s == "(無)" else s
@@ -248,6 +269,7 @@ def meta():
         "cmap_sequential": list(thememod.SEQUENTIAL_CMAPS),
         "cmap_diverging": list(thememod.DIVERGING_CMAPS),
         "cmap_categorical": list(thememod.CATEGORICAL_CMAPS),
+        "cmap_previews": thememod.all_cmap_swatches(),
         "image_formats": IMAGE_FORMATS,
     })
 
@@ -267,7 +289,8 @@ def upload():
         return jsonify({"error": "讀不到任何欄位，請確認第一列是欄名。"}), 400
     token = save_dataset(df)
     cleanup_old(DATASETS_DIR, max_age_h=12)
-    return jsonify({"dataset": token, "label": f.filename, "preview": df_preview(df)})
+    return jsonify({"dataset": token, "label": f.filename,
+                    "preview": df_preview(df), "value_options": value_options(df)})
 
 
 @app.route("/api/demo", methods=["POST"])
@@ -283,7 +306,7 @@ def demo():
     token = save_dataset(df)
     return jsonify({"dataset": token,
                     "label": f"（示範資料：{spec.name}）",
-                    "preview": df_preview(df)})
+                    "preview": df_preview(df), "value_options": value_options(df)})
 
 
 @app.route("/api/validate", methods=["POST"])

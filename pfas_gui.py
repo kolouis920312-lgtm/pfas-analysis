@@ -82,8 +82,9 @@ class App:
         self.df = None
         self.data_label = "（尚未選擇資料）"
 
-        self.param_widgets = {}   # key -> (kind, tk.Variable)
+        self.param_widgets = {}   # key -> (kind, tk.Variable | Listbox)
         self.col_combos = {}      # key -> ttk.Combobox（欄位型參數）
+        self.multi_lists = {}     # key -> tk.Listbox（columns / values 多選）
         self._photos = []         # 預覽圖參考，避免被回收
         self._result = None
         self._error = None
@@ -211,20 +212,40 @@ class App:
         self._paint_color_btn(self.primary_btn, "primary")
         self._paint_color_btn(self.accent_btn, "accent")
 
-        ttk.Label(c, text="連續色階").grid(row=2, column=0, sticky="w", padx=6, pady=4)
+        def _cmap_row(row, label, var, values, attr):
+            ttk.Label(c, text=label).grid(row=row, column=0, sticky="w", padx=6, pady=4)
+            combo = ttk.Combobox(c, textvariable=var, values=values, state="readonly", width=14)
+            combo.grid(row=row, column=1, sticky="w", padx=6, pady=4)
+            canv = tk.Canvas(c, height=16, width=150, highlightthickness=1, highlightbackground="#ccc")
+            canv.grid(row=row, column=2, columnspan=2, sticky="w", padx=6, pady=4)
+            setattr(self, attr, canv)
+            combo.bind("<<ComboboxSelected>>", lambda e: self._paint_swatch(canv, var.get()))
+
         self.seq_var = tk.StringVar(value=self.theme.get("cmap_sequential"))
-        ttk.Combobox(c, textvariable=self.seq_var, values=thememod.SEQUENTIAL_CMAPS,
-                     state="readonly", width=14).grid(row=2, column=1, sticky="w", padx=6, pady=4)
-        ttk.Label(c, text="分散色階").grid(row=2, column=2, sticky="e", padx=6, pady=4)
+        _cmap_row(2, "連續色階", self.seq_var, thememod.SEQUENTIAL_CMAPS, "seq_canvas")
         self.div_var = tk.StringVar(value=self.theme.get("cmap_diverging"))
-        ttk.Combobox(c, textvariable=self.div_var, values=thememod.DIVERGING_CMAPS,
-                     state="readonly", width=14).grid(row=2, column=3, sticky="w", padx=6, pady=4)
-        ttk.Label(c, text="分類色盤").grid(row=3, column=0, sticky="w", padx=6, pady=4)
+        _cmap_row(3, "分散色階", self.div_var, thememod.DIVERGING_CMAPS, "div_canvas")
         self.cat_var = tk.StringVar(value=self.theme.get("cmap_categorical"))
-        ttk.Combobox(c, textvariable=self.cat_var, values=thememod.CATEGORICAL_CMAPS,
-                     state="readonly", width=14).grid(row=3, column=1, sticky="w", padx=6, pady=4)
-        ttk.Label(c, text="連續→熱圖/SOM；分散→相關；分類→分群/站別",
-                  foreground="#777").grid(row=3, column=2, columnspan=2, sticky="w", padx=6, pady=4)
+        _cmap_row(4, "分類色盤", self.cat_var, thememod.CATEGORICAL_CMAPS, "cat_canvas")
+        ttk.Label(c, text="連續→熱圖/SOM；分散→相關；分類→分群/站別；下方色條＝選到的顏色長相",
+                  foreground="#777").grid(row=5, column=0, columnspan=4, sticky="w", padx=6, pady=4)
+        for _canv, _var in ((self.seq_canvas, self.seq_var), (self.div_canvas, self.div_var),
+                            (self.cat_canvas, self.cat_var)):
+            self._paint_swatch(_canv, _var.get())
+
+    def _paint_swatch(self, canvas, name):
+        """把選到的色階畫成一條色塊（連續＝16 段近似漸層；分類＝離散色塊）。"""
+        cols = thememod.cmap_swatch(name)
+        canvas.delete("all")
+        if not cols:
+            return
+        try:
+            w = int(canvas["width"]); h = int(canvas["height"])
+        except Exception:
+            w, h = 150, 16
+        seg = w / len(cols)
+        for i, col in enumerate(cols):
+            canvas.create_rectangle(i * seg, 0, (i + 1) * seg, h, fill=col, outline=col)
 
     # ────────────────────────────────────────────── 主色/強調色
     def _paint_color_btn(self, btn, role):
@@ -263,6 +284,7 @@ class App:
             w.destroy()
         self.param_widgets.clear()
         self.col_combos.clear()
+        self.multi_lists.clear()
         overrides = self.cfg.get("methods", {}).get(self.current_spec.key, {})
         self.params_frame.columnconfigure(1, weight=1)
 
@@ -284,8 +306,21 @@ class App:
                 var = tk.StringVar(value="" if default is None else str(default))
                 combo = ttk.Combobox(self.params_frame, textvariable=var, state="readonly", width=18)
                 combo.grid(row=r, column=1, sticky="w", padx=6, pady=3)
-                combo.bind("<<ComboboxSelected>>", lambda e: self._refresh_validation())
+                combo.bind("<<ComboboxSelected>>",
+                           lambda e: (self._refresh_multi(), self._refresh_validation()))
                 self.col_combos[ps.key] = combo
+            elif ps.kind in ("columns", "values"):
+                box = ttk.Frame(self.params_frame)
+                box.grid(row=r, column=1, sticky="ew", padx=6, pady=3)
+                lb = tk.Listbox(box, selectmode="extended", exportselection=False,
+                                height=5, activestyle="dotbox")
+                sb = ttk.Scrollbar(box, orient="vertical", command=lb.yview)
+                lb.configure(yscrollcommand=sb.set)
+                sb.pack(side="right", fill="y")
+                lb.pack(side="left", fill="both", expand=True)
+                lb.bind("<<ListboxSelect>>", lambda e: self._refresh_validation())
+                self.multi_lists[ps.key] = lb
+                var = lb  # 佔位；collect_params 會走 multi 分支
             else:  # int / float / text
                 var = tk.StringVar(value="" if default is None else str(default))
                 ttk.Entry(self.params_frame, textvariable=var, width=20).grid(
@@ -314,11 +349,39 @@ class App:
                 var.set(want)
             elif var.get() not in vals:
                 var.set("(無)" if ps.optional else (vals[0] if vals else ""))
+        self._refresh_multi()
+
+    def _refresh_multi(self):
+        """重列 columns / values 多選清單的可選項（保留已選取的項目）。"""
+        if not self.current_spec:
+            return
+        cols = list(self.df.columns) if self.df is not None else []
+        for key, lb in self.multi_lists.items():
+            ps = self.current_spec.get_param(key)
+            prev = {lb.get(i) for i in lb.curselection()}
+            if ps.kind == "columns":
+                opts = cols
+            else:  # values：取自 source_col 指定欄位的相異值
+                src = self.param_widgets.get(ps.source_col)
+                srccol = src[1].get() if src else ""
+                opts = []
+                if self.df is not None and srccol in (self.df.columns if self.df is not None else []):
+                    opts = sorted({str(v).strip() for v in self.df[srccol].dropna()
+                                   if str(v).strip()})
+            lb.delete(0, "end")
+            for i, o in enumerate(opts):
+                lb.insert("end", o)
+                if o in prev:
+                    lb.selection_set(i)
 
     # ────────────────────────────────────────────── 蒐集設定
     def collect_params(self):
         p = {}
         for key, (kind, var) in self.param_widgets.items():
+            if kind in ("columns", "values"):
+                # var 是 Listbox；取目前選取的項目（空＝全部）
+                p[key] = [var.get(i) for i in var.curselection()]
+                continue
             val = var.get()
             if kind == "int":
                 try:

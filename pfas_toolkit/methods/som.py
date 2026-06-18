@@ -10,6 +10,7 @@ import pandas as pd
 
 from ..core.spec import MethodSpec, ParamSpec, InputSchema
 from ..core.theme import get_plt
+from ..core.prep import as_list, apply_value_filter
 
 
 class SOM:
@@ -75,11 +76,13 @@ def overlap_analysis(out, node_regime, n_regime, site_col):
 
 
 def _hits_plot(ctx, plt, out, cats, cmap_cat, rng, title, name):
-    fig, ax = plt.subplots(figsize=(5.5, 5))
+    fig, ax = plt.subplots(figsize=(5.8, 5.2))
     ax.scatter(out["bmu_col"] + rng.normal(0, 0.12, len(out)),
                out["bmu_row"] + rng.normal(0, 0.12, len(out)),
                c=cats.cat.codes, cmap=cmap_cat, s=40)
-    ax.set_title(title); ax.invert_yaxis()
+    ax.set_title(title + "\n每點＝一個樣本落在它最像的格子；同色聚一區＝該組指紋一致、散開＝型態多樣",
+                 fontsize=10)
+    ax.set_xlabel("行 (col)"); ax.set_ylabel("列 (row)"); ax.invert_yaxis()
     cmobj = plt.get_cmap(cmap_cat)
     k = max(len(cats.cat.categories) - 1, 1)
     handles = [plt.Line2D([], [], marker="o", ls="", color=cmobj(i / k), label=c)
@@ -109,10 +112,22 @@ def run(df, params, ctx):
     cmap_seq = ctx.color("cmap_sequential", "viridis")
     cmap_cat = ctx.color("cmap_categorical", "tab10")
 
+    # ── 先依「站別/季節」篩選要納入的樣本（空＝全部）──
+    df = apply_value_filter(df, ctx, site_col, params.get("site_keep"), what="站別樣本")
+    df = apply_value_filter(df, ctx, season_col, params.get("season_keep"), what="季節樣本")
+
     meta_cols = [c for c in (id_col, site_col, season_col) if c and c in df.columns]
     feats = [c for c in df.columns if c not in meta_cols and pd.api.types.is_numeric_dtype(df[c])]
+    # ── 化合物子集（空＝全部）──
+    keep_feats = as_list(params.get("feature_cols"))
+    if keep_feats:
+        miss = [c for c in keep_feats if c not in feats]
+        if miss:
+            ctx.log(f"⚠ 指定的化合物不在數值欄中，已略過：{miss}")
+        feats = [c for c in keep_feats if c in feats]
+        ctx.log(f"只納入選定的 {len(feats)} 個化合物：{feats}")
     if len(feats) < 2:
-        raise ValueError("SOM 需至少 2 個數值特徵。")
+        raise ValueError("SOM 需至少 2 個數值特徵（化合物）。若有用『納入化合物』篩選，請至少選 2 個。")
     X = df[feats].values.astype(float)
     X = np.nan_to_num(X, nan=np.nanmedian(X))
     X = (X - X.mean(0)) / (X.std(0) + 1e-9)
@@ -151,22 +166,49 @@ def run(df, params, ctx):
         elif focus_a or focus_b:
             ctx.log(f"焦點站對 {focus_a}/{focus_b} 在資料中找不到，已略過。")
 
-    # Component planes
+    # ── regime 地圖（把節點再分群的結果塗色；過去只有 CSV、沒有圖）──
+    regime_grid = km.labels_.reshape(grid_m, grid_n)
+    n_used = int(len(np.unique(km.labels_)))
+    fig, ax = plt.subplots(figsize=(5.2, 4.8))
+    disc = plt.get_cmap(cmap_cat, max(n_used, 1))
+    im = ax.imshow(regime_grid, cmap=disc, vmin=-0.5, vmax=n_used - 0.5)
+    for (r, c), lab in np.ndenumerate(regime_grid):
+        ax.text(c, r, str(int(lab)), ha="center", va="center",
+                fontsize=9, color="white", fontweight="bold")
+    ax.set_title("Regime 地圖：節點屬於哪個來源型態區")
+    ax.set_xlabel("行 (col)"); ax.set_ylabel("列 (row)")
+    cbar = fig.colorbar(im, ax=ax, ticks=range(n_used), fraction=0.046)
+    cbar.set_label("regime 編號")
+    fig.tight_layout(); ctx.save_fig(fig, "som_regime_map")
+
+    # ── Component planes（每張小圖＝同一張地圖、用一個物種上色）──
+    # 用「共用色階」讓各物種可比較；亮＝該格典型指紋裡此物種相對高。
     ncol = min(4, len(feats)); nrow = int(np.ceil(len(feats) / ncol))
-    fig, axes = plt.subplots(nrow, ncol, figsize=(3 * ncol, 2.6 * nrow))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(3 * ncol, 2.7 * nrow + 0.9),
+                             constrained_layout=True)
     axflat = np.atleast_1d(axes).ravel()
+    vmin, vmax = float(som.W.min()), float(som.W.max())
+    im = None
     for ax, k in zip(axflat, range(len(feats))):
-        ax.imshow(som.W[:, k].reshape(grid_m, grid_n), cmap=cmap_seq)
-        ax.set_title(feats[k], fontsize=8); ax.axis("off")
+        im = ax.imshow(som.W[:, k].reshape(grid_m, grid_n), cmap=cmap_seq,
+                       vmin=vmin, vmax=vmax)
+        ax.set_title(feats[k], fontsize=9); ax.axis("off")
     for ax in axflat[len(feats):]:
         ax.axis("off")
-    fig.suptitle("Component planes (各物種權重)"); fig.tight_layout()
+    if im is not None:
+        cb = fig.colorbar(im, ax=axflat.tolist(), fraction=0.03, pad=0.02)
+        cb.set_label("權重（標準化後；亮=相對高、暗=相對低）")
+    fig.suptitle("Component planes　每張小圖＝同一張 SOM 地圖、用一個物種上色\n"
+                 "亮＝該區典型指紋中此物種相對高；亮區重疊的物種＝常一起出現（可能同源）",
+                 fontsize=10)
     ctx.save_fig(fig, "som_components")
 
     # U-matrix
-    fig, ax = plt.subplots(figsize=(5, 4.5))
+    fig, ax = plt.subplots(figsize=(5.4, 4.8))
     im = ax.imshow(som.umatrix(), cmap=cmap_seq); fig.colorbar(im, ax=ax)
-    ax.set_title("U-matrix (節點距離；亮=分群邊界)")
+    ax.set_title("U-matrix：相鄰節點的指紋差異\n亮＝差異大（不同群的邊界）；暗成一片＝同一種型態的區域",
+                 fontsize=10)
+    ax.set_xlabel("行 (col)"); ax.set_ylabel("列 (row)")
     fig.tight_layout(); ctx.save_fig(fig, "som_umatrix")
 
     if site_col and site_col in df.columns:
@@ -176,7 +218,7 @@ def run(df, params, ctx):
         _hits_plot(ctx, plt, out, df[season_col].astype("category"), cmap_cat, rng,
                    "各季在 SOM 拓樸落點", "som_hits_season")
 
-    return ctx.result(summary=f"SOM {grid_m}×{grid_n} 完成：BMU、regime、component planes、U-matrix"
+    return ctx.result(summary=f"SOM {grid_m}×{grid_n} 完成：BMU、regime 地圖、component planes、U-matrix"
                               + ("、站/季落點與重疊度" if site_col else "") + "。")
 
 
@@ -188,6 +230,14 @@ SPEC = MethodSpec(
         ParamSpec("id_col", "ID 欄（可空）", "column", default="sample_id", optional=True),
         ParamSpec("site_col", "站別欄（可空）", "column", default="site", optional=True),
         ParamSpec("season_col", "季節欄（可空）", "column", default="season", optional=True),
+        ParamSpec("feature_cols", "納入的化合物（不選＝全部）", "columns", default=[],
+                  help="勾選要餵進 SOM 的物種；不勾就用全部數值欄。"),
+        ParamSpec("site_keep", "只納入這些站別（不選＝全部）", "values", default=[],
+                  source_col="site_col",
+                  help="只想看某幾站時勾選；對選到的樣本子集跑單一張 SOM。"),
+        ParamSpec("season_keep", "只納入這些季節（不選＝全部）", "values", default=[],
+                  source_col="season_col",
+                  help="只想看某幾季時勾選。"),
         ParamSpec("grid_m", "SOM 列數 m", "int", default=7, minimum=2),
         ParamSpec("grid_n", "SOM 行數 n", "int", default=7, minimum=2),
         ParamSpec("iters", "訓練迭代數", "int", default=5000, minimum=100),

@@ -30,9 +30,10 @@ def run(df, params, ctx):
     plt = get_plt(ctx.theme)
 
     X = numeric_frame(df, ctx, id_col=params.get("id_col"),
-                      drop_cols=(params.get("target_col"),))
+                      drop_cols=(params.get("target_col"),),
+                      keep_cols=params.get("feature_cols"))
     if X.shape[1] < 2:
-        raise ValueError("可用數值特徵少於 2 欄，無法 PCA。")
+        raise ValueError("可用數值特徵少於 2 欄，無法 PCA。（若有用『納入特徵欄』篩選，請至少選 2 個）")
     feats = list(X.columns)
     ctx.log(f"樣本 {X.shape[0]}；特徵 {X.shape[1]}")
 
@@ -110,6 +111,8 @@ SPEC = MethodSpec(
                   help="樣本識別欄，會設為索引；留空則用列號。"),
         ParamSpec("target_col", "排除欄/標籤欄（可空）", "column", default="", optional=True,
                   help="不參與分析的欄（如分類標籤）。"),
+        ParamSpec("feature_cols", "納入的特徵欄（不選＝全部）", "columns", default=[],
+                  help="勾選要納入分析的數值欄；不勾就用全部。"),
         ParamSpec("n_components", "保留主成分數（0=全部）", "int", default=0, minimum=0,
                   help="0＝全部保留，之後看 elbow 圖再決定。"),
     ],

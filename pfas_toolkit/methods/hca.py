@@ -39,9 +39,10 @@ def run(df, params, ctx):
     cmap_cat = ctx.color("cmap_categorical", "tab10")
 
     X = numeric_frame(df, ctx, id_col=params.get("id_col"),
-                      drop_cols=(params.get("target_col"),))
+                      drop_cols=(params.get("target_col"),),
+                      keep_cols=params.get("feature_cols"))
     if X.shape[1] < 2:
-        raise ValueError("可用數值特徵少於 2 欄，無法分群。")
+        raise ValueError("可用數值特徵少於 2 欄，無法分群。（若有用『納入特徵欄』篩選，請至少選 2 個）")
     if n_clusters >= X.shape[0]:
         raise ValueError(f"群數 {n_clusters} 不可 >= 樣本數 {X.shape[0]}。")
     ctx.log(f"樣本 {X.shape[0]}；特徵 {X.shape[1]}；linkage={method}")
@@ -134,6 +135,8 @@ SPEC = MethodSpec(
     params=[
         ParamSpec("id_col", "ID 欄（可空）", "column", default="", optional=True),
         ParamSpec("target_col", "排除欄/標籤欄（可空）", "column", default="", optional=True),
+        ParamSpec("feature_cols", "納入的特徵欄（不選＝全部）", "columns", default=[],
+                  help="勾選要納入分群的數值欄；不勾就用全部。"),
         ParamSpec("linkage_method", "連結方法", "choice", default="ward",
                   choices=["ward", "complete", "average", "single"]),
         ParamSpec("max_clusters", "評估的最大群數", "int", default=10, minimum=2),

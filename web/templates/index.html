@@ -72,15 +72,18 @@
           </label>
           <label>連續色階
             <select id="cmap_sequential"></select>
+            <div class="swatch" id="swatch_sequential"></div>
           </label>
           <label>分散色階
             <select id="cmap_diverging"></select>
+            <div class="swatch" id="swatch_diverging"></div>
           </label>
           <label>分類色盤
             <select id="cmap_categorical"></select>
+            <div class="swatch" id="swatch_categorical"></div>
           </label>
         </div>
-        <p class="hint">連續→熱圖/SOM；分散→相關；分類→分群/站別</p>
+        <p class="hint">連續→熱圖/SOM；分散→相關；分類→分群/站別。下方色條／色塊就是選到的顏色長相。</p>
       </div>
 
       <!-- ⑤ 輸出設定 -->
@@ -134,11 +137,13 @@
       </div>
       <div class="modal-tabs">
         <button class="modal-tab active" data-tab="beginner">🐣 快速上手</button>
+        <button class="modal-tab" data-tab="params">⚙ 參數詳解</button>
         <button class="modal-tab" data-tab="pro">🔬 原理與算法</button>
         <button class="modal-tab" data-tab="glossary">📒 名詞詞彙表</button>
       </div>
       <div class="modal-body">
         <div id="manual-beginner" class="manual-pane markdown"></div>
+        <div id="manual-params" class="manual-pane markdown hidden"></div>
         <div id="manual-pro" class="manual-pane markdown hidden"></div>
         <div id="manual-glossary" class="manual-pane markdown hidden"></div>
       </div>

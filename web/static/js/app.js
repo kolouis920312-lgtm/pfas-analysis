@@ -15,6 +15,7 @@ const state = {
   current: null,     // 目前選的 spec
   dataset: null,     // 資料 token
   columns: [],       // 目前資料的欄名
+  valueOptions: {},  // {欄名: [相異值…]}（給「多選值」參數用，如挑站別）
 };
 
 // ───────────────────────────────── 初始化
@@ -129,6 +130,9 @@ function buildParams() {
     } else if (p.kind === "column") {
       input = makeSelect(columnOptions(p), columnDefault(p));
       input.addEventListener("change", refreshValidation);
+    } else if (p.kind === "columns" || p.kind === "values") {
+      input = document.createElement("div");
+      input.className = "multi-list";
     } else {
       input = document.createElement("input");
       input.type = (p.kind === "int" || p.kind === "float") ? "number" : "text";
@@ -143,7 +147,22 @@ function buildParams() {
     input.dataset.kind = p.kind;
     // 改參數就重新驗證（debounce）
     input.addEventListener("input", debouncedValidate);
-    control.appendChild(input);
+
+    // 多選欄位：加「全選/全不選」工具列並列出可勾選項目
+    if (p.kind === "columns" || p.kind === "values") {
+      const tb = document.createElement("div");
+      tb.className = "multi-toolbar";
+      const all = document.createElement("a"); all.textContent = "全選";
+      const none = document.createElement("a"); none.textContent = "全不選";
+      all.addEventListener("click", () => { setAllChecks(input, true); debouncedValidate(); });
+      none.addEventListener("click", () => { setAllChecks(input, false); debouncedValidate(); });
+      tb.appendChild(all); tb.appendChild(none);
+      control.appendChild(tb);
+      control.appendChild(input);
+      fillMultiList(input, p);
+    } else {
+      control.appendChild(input);
+    }
 
     if (p.help) {
       const help = document.createElement("div");
@@ -153,6 +172,62 @@ function buildParams() {
     }
     row.appendChild(control);
     wrap.appendChild(row);
+  });
+
+  // 「多選值」參數（如挑站別）：來源欄位一變更，就重列可勾選的值
+  spec.params.forEach((p) => {
+    if (p.kind !== "values" || !p.source_col) return;
+    const srcSel = document.querySelector(`#params [data-key="${cssEscape(p.source_col)}"]`);
+    const list = document.querySelector(`#params .param-input[data-key="${cssEscape(p.key)}"]`);
+    if (srcSel && list) srcSel.addEventListener("change", () => fillMultiList(list, p));
+  });
+}
+
+// 列出多選清單的可勾選項目（columns＝資料欄名；values＝來源欄的相異值）
+function fillMultiList(container, p) {
+  let opts = [];
+  if (p.kind === "columns") {
+    opts = state.columns.slice();
+  } else if (p.kind === "values") {
+    const srcSel = document.querySelector(`#params [data-key="${cssEscape(p.source_col)}"]`);
+    const srcCol = srcSel ? srcSel.value : "";
+    opts = (state.valueOptions && state.valueOptions[srcCol]) || [];
+  }
+  const prev = new Set(Array.from(container.querySelectorAll("input:checked")).map((c) => c.value));
+  container.innerHTML = "";
+  if (!opts.length) {
+    container.innerHTML = `<span class="hint">${
+      p.kind === "values"
+        ? "（先在上方選好對應欄位、並載入資料後，這裡會列出可勾選的值）"
+        : "（載入資料後，這裡會列出可勾選的欄位；不勾＝全部）"
+    }</span>`;
+    return;
+  }
+  opts.forEach((o) => {
+    const lab = document.createElement("label");
+    lab.className = "multi-item";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = o;
+    if (prev.has(o)) cb.checked = true;
+    cb.addEventListener("change", debouncedValidate);
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(o));
+    container.appendChild(lab);
+  });
+}
+
+function setAllChecks(container, on) {
+  container.querySelectorAll('input[type="checkbox"]').forEach((c) => (c.checked = on));
+}
+
+// 上傳/示範資料或切換來源欄後，重建所有多選清單
+function refreshMultiParams() {
+  if (!state.current) return;
+  state.current.params.forEach((p) => {
+    if (p.kind !== "columns" && p.kind !== "values") return;
+    const list = document.querySelector(`#params .param-input[data-key="${cssEscape(p.key)}"]`);
+    if (list) fillMultiList(list, p);
   });
 }
 
@@ -206,7 +281,14 @@ function cssEscape(s) {
 function collectParams() {
   const out = {};
   document.querySelectorAll("#params .param-input").forEach((inp) => {
-    out[inp.dataset.key] = (inp.dataset.kind === "bool") ? inp.checked : inp.value;
+    const kind = inp.dataset.kind;
+    if (kind === "bool") {
+      out[inp.dataset.key] = inp.checked;
+    } else if (kind === "columns" || kind === "values") {
+      out[inp.dataset.key] = Array.from(inp.querySelectorAll("input:checked")).map((c) => c.value);
+    } else {
+      out[inp.dataset.key] = inp.value;
+    }
   });
   return out;
 }
@@ -260,10 +342,12 @@ async function onDemo() {
 function applyDataset(res) {
   state.dataset = res.dataset;
   state.columns = res.preview.columns;
+  state.valueOptions = res.value_options || {};
   $("#data-label").textContent =
     `${res.label}　(${res.preview.nrows} 列 × ${res.preview.ncols} 欄)`;
   renderPreview(res.preview);
   refreshColumnParams();
+  refreshMultiParams();
   refreshValidation();
 }
 
@@ -401,6 +485,7 @@ function openManual() {
   if (!spec || !spec.manual) return;
   $("#manual-title").textContent = spec.name + " · 使用說明書";
   $("#manual-beginner").innerHTML = renderMarkdown(spec.manual.beginner) + exampleFigureHtml(spec);
+  $("#manual-params").innerHTML = renderMarkdown(spec.manual.params);
   $("#manual-pro").innerHTML = renderMarkdown(spec.manual.pro);
   $("#manual-glossary").innerHTML = renderMarkdown((state.meta && state.meta.glossary) || "");
   switchManualTab("beginner");
@@ -415,6 +500,7 @@ function switchManualTab(tab) {
   document.querySelectorAll(".modal-tab").forEach((t) =>
     t.classList.toggle("active", t.dataset.tab === tab));
   $("#manual-beginner").classList.toggle("hidden", tab !== "beginner");
+  $("#manual-params").classList.toggle("hidden", tab !== "params");
   $("#manual-pro").classList.toggle("hidden", tab !== "pro");
   $("#manual-glossary").classList.toggle("hidden", tab !== "glossary");
 }
@@ -464,12 +550,51 @@ function renderMarkdown(md) {
 }
 
 // ───────────────────────────────── 主題 / 輸出控制
+const SWATCHES = [
+  ["cmap_sequential", "swatch_sequential", "grad"],
+  ["cmap_diverging", "swatch_diverging", "grad"],
+  ["cmap_categorical", "swatch_categorical", "chips"],
+];
+
 function buildThemeControls() {
   fillDatalist("#font-list", state.meta.fonts);
   fillSelect("#cmap_sequential", state.meta.cmap_sequential);
   fillSelect("#cmap_diverging", state.meta.cmap_diverging);
   fillSelect("#cmap_categorical", state.meta.cmap_categorical);
   applyThemeDefaults();
+  // 顏色示意圖：選色階就即時看到長相
+  SWATCHES.forEach(([selId, swId, type]) => {
+    $("#" + selId).addEventListener("change", () =>
+      renderSwatch($("#" + swId), $("#" + selId).value, type));
+  });
+  updateAllSwatches();
+}
+
+function renderSwatch(el, name, type) {
+  if (!el) return;
+  const cols = (state.meta && state.meta.cmap_previews && state.meta.cmap_previews[name]) || [];
+  el.innerHTML = "";
+  if (!cols.length) return;
+  if (type === "chips") {
+    const wrap = document.createElement("div");
+    wrap.className = "chips";
+    cols.forEach((c) => {
+      const s = document.createElement("span");
+      s.className = "chip"; s.style.background = c; s.title = c;
+      wrap.appendChild(s);
+    });
+    el.appendChild(wrap);
+  } else {
+    const bar = document.createElement("div");
+    bar.className = "gradient";
+    bar.style.background = `linear-gradient(to right, ${cols.join(", ")})`;
+    el.appendChild(bar);
+  }
+}
+
+function updateAllSwatches() {
+  SWATCHES.forEach(([selId, swId, type]) =>
+    renderSwatch($("#" + swId), $("#" + selId).value, type));
 }
 
 function applyThemeDefaults() {
@@ -484,6 +609,7 @@ function applyThemeDefaults() {
 
 function resetTheme() {
   applyThemeDefaults();
+  updateAllSwatches();
   savePrefs();
 }
 
@@ -516,6 +642,7 @@ function restorePrefs() {
   if (t.cmap_categorical) $("#cmap_categorical").value = t.cmap_categorical;
   if (prefs.image_format) $("#image_format").value = prefs.image_format;
   if (prefs.dpi) $("#dpi").value = prefs.dpi;
+  updateAllSwatches();
   if (prefs.method && state.methods.some((m) => m.key === prefs.method)) {
     // 在 init 末端 selectMethod 前先記住；這裡直接切過去
     setTimeout(() => selectMethod(prefs.method), 0);

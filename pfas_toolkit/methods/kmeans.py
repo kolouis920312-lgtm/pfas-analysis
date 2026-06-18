@@ -31,7 +31,8 @@ def run(df, params, ctx):
                                  davies_bouldin_score)
     plt = get_plt(ctx.theme)
 
-    X = numeric_frame(df, ctx, id_col=params.get("id_col"))
+    X = numeric_frame(df, ctx, id_col=params.get("id_col"),
+                      keep_cols=params.get("feature_cols"))
     if X.shape[1] < 1:
         raise ValueError("沒有可用的數值欄。")
     use = int(params.get("use_n_pcs") or 0)
@@ -122,6 +123,8 @@ SPEC = MethodSpec(
     summary="在數值座標（常用 PCA 輸出）上做 K-means，並用 4 指標量化最佳群數。",
     params=[
         ParamSpec("id_col", "ID 欄（可空）", "column", default="", optional=True),
+        ParamSpec("feature_cols", "納入的欄（不選＝全部）", "columns", default=[],
+                  help="勾選要納入分群的數值欄（例：只挑某幾個 PC）；不勾就用全部。"),
         ParamSpec("use_n_pcs", "只用前幾維（0=全部）", "int", default=0, minimum=0),
         ParamSpec("max_k", "掃描的最大群數", "int", default=10, minimum=2),
         ParamSpec("n_clusters", "最終分群數", "int", default=3, minimum=2,

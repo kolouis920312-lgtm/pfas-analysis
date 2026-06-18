@@ -35,6 +35,36 @@ FONT_CHOICES = ["Microsoft JhengHei", "Microsoft YaHei", "SimHei",
                 "PMingLiU", "DFKai-SB", "Noto Sans CJK TC", "DejaVu Sans"]
 
 
+def cmap_swatch(name: str, n: int = 16) -> list:
+    """把一個 matplotlib colormap 取樣成 hex 色碼清單（給 UI 畫顏色示意圖）。
+
+    分類色盤（ListedColormap）回傳它的離散顏色；連續/分散色階等距取樣 n 個。
+    取不到（名稱錯）就回空清單，呼叫端自行容錯。
+    """
+    from matplotlib.colors import to_hex
+    try:
+        import matplotlib as mpl
+        try:
+            cmap = mpl.colormaps[name]            # matplotlib ≥ 3.6
+        except Exception:
+            cmap = mpl.cm.get_cmap(name)
+    except Exception:
+        return []
+    discrete = getattr(cmap, "colors", None)
+    if discrete is not None and len(discrete) <= 24:
+        return [to_hex(c) for c in discrete]
+    denom = max(n - 1, 1)
+    return [to_hex(cmap(i / denom)) for i in range(n)]
+
+
+def all_cmap_swatches() -> dict:
+    """所有內建 colormap 名稱 → 色碼清單（一次給前端，選色時即時預覽）。"""
+    out = {}
+    for nm in (*SEQUENTIAL_CMAPS, *DIVERGING_CMAPS, *CATEGORICAL_CMAPS):
+        out[nm] = cmap_swatch(nm)
+    return out
+
+
 def merge_theme(theme: dict | None) -> dict:
     """把使用者主題疊在預設值上，確保每個角色都有值。"""
     out = dict(DEFAULT_THEME)

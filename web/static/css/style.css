@@ -133,6 +133,26 @@ input[type="color"] {
 }
 .param-control input[type="checkbox"] { width: 20px; height: 20px; margin-top: 6px; cursor: pointer; }
 
+/* 多選欄位（columns / values）核取清單 */
+.multi-list {
+  display: flex; flex-wrap: wrap; gap: 6px 14px;
+  border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
+  max-height: 172px; overflow-y: auto; background: #fff;
+}
+.multi-item {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 13px;
+  padding: 1px 3px; cursor: pointer; user-select: none; white-space: nowrap;
+}
+.multi-item input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.multi-toolbar { display: flex; gap: 12px; margin-bottom: 4px; }
+.multi-toolbar a { font-size: 12px; color: var(--primary-dark); cursor: pointer; text-decoration: underline; }
+
+/* 顏色示意圖（選色階時即時預覽長相） */
+.swatch { margin-top: 6px; }
+.swatch .gradient { height: 16px; border-radius: 5px; border: 1px solid var(--line); }
+.swatch .chips { display: flex; gap: 3px; flex-wrap: wrap; }
+.swatch .chip { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(0, 0, 0, .14); }
+
 /* 按鈕 */
 .btn {
   padding: 9px 16px; border: 1px solid var(--line); border-radius: 9px; background: #fff;

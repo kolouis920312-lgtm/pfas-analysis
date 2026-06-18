@@ -9,6 +9,7 @@ import pandas as pd
 
 from ..core.spec import MethodSpec, ParamSpec, InputSchema
 from ..core.theme import get_plt
+from ..core.prep import as_list
 
 
 def make_demo(seed=3):
@@ -74,8 +75,15 @@ def run(df, params, ctx):
         time_col = None
     drop = {id_col, group_col, time_col}
     species = [c for c in df.columns if c not in drop and pd.api.types.is_numeric_dtype(df[c])]
+    keep_vars = as_list(params.get("var_cols"))
+    if keep_vars:
+        miss = [c for c in keep_vars if c not in species]
+        if miss:
+            ctx.log(f"⚠ 指定的變數不在數值欄中，已略過：{miss}")
+        species = [c for c in keep_vars if c in species]
+        ctx.log(f"只分析選定的 {len(species)} 個變數：{species}")
     if len(species) < 1:
-        raise ValueError("找不到數值變數欄。")
+        raise ValueError("找不到數值變數欄。（若有用『分析的變數欄』篩選，請至少選 1 個）")
     ctx.log(f"數值變數 {len(species)} 欄；group={group_col}；time={time_col}；α={alpha:g}")
     cmap_div = ctx.color("cmap_diverging", "RdBu_r")
     did = []
@@ -176,6 +184,8 @@ SPEC = MethodSpec(
                   help="如 season / site；2 群用 Mann-Whitney，>2 群用 Kruskal-Wallis。"),
         ParamSpec("time_col", "時間欄（做趨勢，可空）", "column", default="date", optional=True,
                   help="如 date；做 Mann-Kendall 趨勢與 Sen's slope。"),
+        ParamSpec("var_cols", "分析的變數欄（不選＝全部）", "columns", default=[],
+                  help="勾選要納入群差異/趨勢/相關的數值變數；不勾就用全部。"),
         ParamSpec("alpha", "顯著水準 α", "float", default=0.05, minimum=0.0001, maximum=0.5,
                   help="判定顯著的門檻（校正後 p 小於此值才標 *）。預設 0.05；要更嚴格可填 0.01。"),
     ],

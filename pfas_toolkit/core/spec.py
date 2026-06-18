@@ -19,7 +19,13 @@ from typing import Any, Callable, Optional
 #   "bool"    布林      → 勾選框
 #   "choice"  下拉選單  → choices 提供選項
 #   "column"  欄位選擇  → 下拉，選項來自上傳資料的欄名（optional=True 時可選「(無)」）
+#   "columns" 多選欄位  → 核取清單，選項＝上傳資料的欄名；值為 list[str]；空 list＝全部
+#   "values"  多選值    → 核取清單，選項＝某欄的相異值（由 source_col 指定是哪一欄）；
+#                         值為 list[str]；空 list＝全部（常用來「挑要納入哪些站別/季節」）
 #   "text"    文字      → 文字輸入框
+#
+# columns / values 的「空 list ＝ 全部」設計：使用者不勾就是沿用舊行為（全用），
+# 完全向後相容；勾了才會縮成子集。
 @dataclass
 class ParamSpec:
     key: str
@@ -31,6 +37,7 @@ class ParamSpec:
     maximum: Optional[float] = None
     help: str = ""
     optional: bool = False          # 僅對 "column"：允許留空 / 選「(無)」
+    source_col: Optional[str] = None  # 僅對 "values"：相異值取自「哪個欄位型參數」選到的欄
 
 
 @dataclass

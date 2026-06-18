@@ -5,7 +5,7 @@
 from . import (pca, kmeans, hca, som, nonparam,
                xgboost_reg, bdl, coda, ml_drivers,
                trajectory, pmf, partitioning, lrtp)
-from ._manuals import MANUALS, GLOSSARY
+from ._manuals import MANUALS, GLOSSARY, PARAM_MANUALS
 
 # 顯示順序（後 4 個為大氣長程傳輸專用：受體模型 / 來源解析 / 程序模型）
 _MODULES = [pca, kmeans, hca, som, nonparam, xgboost_reg, bdl, coda, ml_drivers,
@@ -18,6 +18,13 @@ ORDER = [m.SPEC.key for m in _MODULES]
 for _key, _man in MANUALS.items():
     if _key in REGISTRY:
         REGISTRY[_key].manual = _man
+
+# 再掛上「參數詳解」分頁內容（manual["params"]）
+for _key, _pman in PARAM_MANUALS.items():
+    if _key in REGISTRY:
+        if not isinstance(REGISTRY[_key].manual, dict):
+            REGISTRY[_key].manual = {}
+        REGISTRY[_key].manual["params"] = _pman
 
 
 def all_specs():
