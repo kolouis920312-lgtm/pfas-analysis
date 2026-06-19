@@ -177,6 +177,19 @@ input[type="color"] {
 .results-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 12px; }
 .results-head h2 { margin: 0; }
 .results-meta { color: var(--muted); font-size: 14px; }
+/* 互動式地圖（Plotly iframe，全寬，置於兩欄結果之上） */
+.interactives { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; }
+.interactives:empty { display: none; }
+.interactive-item {
+  background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 14px 16px;
+}
+.interactive-item .cap { font-size: 14px; color: var(--ink); margin-bottom: 8px; font-weight: 600; }
+.interactive-item .cap a { font-size: 13px; font-weight: 400; color: var(--primary-dark); margin-left: 8px; }
+.interactive-item iframe {
+  width: 100%; height: 620px; border: 1px solid var(--line); border-radius: 8px; background: #fff;
+}
+
 .results-body { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
 .result-col {
   background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 20px;

@@ -9,7 +9,9 @@ trajectory.py — 軌跡受體模型 PSCF / CWT（潛在源區辨識）
 
 輸出：
   ‧ trajectory_grid.csv（各網格中心經緯、端點數 n、PSCF、CWT）
-  ‧ PSCF 圖（高濃度條件機率熱點）、CWT 圖（濃度權重來源強度）
+  ‧ PSCF 圖（高濃度條件機率熱點）、CWT 圖（濃度權重來源強度）— matplotlib 靜態圖
+  ‧ 互動式地圖 HTML（PSCF/CWT 半透明疊在真實地形/地圖底圖上，可縮放/平移/懸停）
+    需安裝 plotly（見 requirements.txt）；未安裝則自動略過、不影響其他輸出。
 
 原理：
   PSCF_ij = m_ij / n_ij      經過格 ij 且屬高濃度軌跡的端點比例
@@ -61,6 +63,122 @@ def _weight(n, nmean):
     return w
 
 
+# ── 互動式地圖（Plotly；把 PSCF/CWT 疊在真實地形/地圖底圖上）──────────────
+# 底圖用「免金鑰的公開圖磚」：Esri 地形陰影/地形圖/衛星，或 OSM/Carto 街道淺色。
+# 需連網載入圖磚；沒裝 plotly 時整段被 run() 的 try/except 略過，不影響靜態圖。
+_ESRI_TILE = ("https://server.arcgisonline.com/ArcGIS/rest/services/"
+              "{svc}/MapServer/tile/{{z}}/{{y}}/{{x}}")
+_ESRI_SVC = {"terrain": "World_Shaded_Relief",   # 地形陰影（灰階起伏）
+             "topo": "World_Topo_Map",            # 地形圖（含地名、等高線）
+             "satellite": "World_Imagery"}        # 衛星影像
+
+
+def _theme_colorscale(ctx, n=12):
+    """把使用者選的連續色階（matplotlib 名稱）轉成 Plotly colorscale。"""
+    from ..core.theme import cmap_swatch
+    name = ctx.color("cmap_sequential", "viridis")
+    cols = cmap_swatch(name, n) or cmap_swatch("viridis", n)
+    if not cols:
+        return "Viridis"
+    denom = max(len(cols) - 1, 1)
+    return [[i / denom, c] for i, c in enumerate(cols)]
+
+
+def _basemap_cfg(style, center, zoom):
+    """組出 Plotly 地圖底圖設定（新版 map / 舊版 mapbox 共用同一組鍵）。"""
+    cfg = dict(center=center, zoom=zoom)
+    if style in _ESRI_SVC:
+        url = _ESRI_TILE.format(svc=_ESRI_SVC[style])
+        cfg["style"] = "white-bg"
+        cfg["layers"] = [dict(below="traces", sourcetype="raster",
+                              source=[url], sourceattribution="Esri")]
+    elif style == "streets":
+        cfg["style"] = "open-street-map"
+    elif style == "light":
+        cfg["style"] = "carto-positron"
+    else:  # none：純白底，只看網格
+        cfg["style"] = "white-bg"
+    return cfg
+
+
+def _grid_geojson(lat_edges, lon_edges, n_cell):
+    """把每個「有端點」的網格做成一個正方形多邊形（GeoJSON FeatureCollection）。"""
+    feats = []
+    ni, nj = n_cell.shape
+    for i in range(ni):
+        for j in range(nj):
+            if n_cell[i, j] <= 0:
+                continue
+            la0, la1 = float(lat_edges[i]), float(lat_edges[i + 1])
+            lo0, lo1 = float(lon_edges[j]), float(lon_edges[j + 1])
+            feats.append({
+                "type": "Feature", "id": f"{i}_{j}",
+                "geometry": {"type": "Polygon", "coordinates": [[
+                    [lo0, la0], [lo1, la0], [lo1, la1], [lo0, la1], [lo0, la0]]]},
+                "properties": {},
+            })
+    return {"type": "FeatureCollection", "features": feats}
+
+
+def _save_interactive_maps(ctx, lat_edges, lon_edges, n_cell, pscf, cwt,
+                           recep, basemap, opacity):
+    """輸出 PSCF / CWT 兩張可縮放互動地圖（HTML），網格半透明疊在底圖上。"""
+    import plotly.graph_objects as go
+    import plotly.io as pio
+
+    gj = _grid_geojson(lat_edges, lon_edges, n_cell)
+    if not gj["features"]:
+        return
+
+    # 新版 plotly（>=5.24/6.x）用 MapLibre 的 *map 系列；舊版退回 *mapbox。
+    new_api = hasattr(go, "Choroplethmap")
+    Choro = go.Choroplethmap if new_api else go.Choroplethmapbox
+    Scatter = go.Scattermap if new_api else go.Scattermapbox
+    layout_key = "map" if new_api else "mapbox"
+
+    lat_c = float((lat_edges[0] + lat_edges[-1]) / 2)
+    lon_c = float((lon_edges[0] + lon_edges[-1]) / 2)
+    span = max(float(lat_edges[-1] - lat_edges[0]),
+               float(lon_edges[-1] - lon_edges[0]), 1e-6)
+    zoom = float(np.clip(np.log2(360.0 / span) - 1.0, 1.0, 10.0))
+    cs = _theme_colorscale(ctx)
+    accent = ctx.color("accent", "#ff6347")
+    ni, nj = n_cell.shape
+
+    for field, name, title, lab in [
+        (pscf, "pscf_map_interactive", "PSCF 潛在源區（互動地圖·可縮放）", "PSCF"),
+        (cwt, "cwt_map_interactive", "CWT 來源強度（互動地圖·可縮放）", "CWT"),
+    ]:
+        locs, zz, text = [], [], []
+        for i in range(ni):
+            for j in range(nj):
+                if n_cell[i, j] <= 0 or not np.isfinite(field[i, j]):
+                    continue
+                la = float((lat_edges[i] + lat_edges[i + 1]) / 2)
+                lo = float((lon_edges[j] + lon_edges[j + 1]) / 2)
+                locs.append(f"{i}_{j}")
+                zz.append(round(float(field[i, j]), 3))
+                text.append(f"緯度 {la:.2f}．經度 {lo:.2f}<br>"
+                            f"{lab} {field[i, j]:.3f}<br>端點 {int(n_cell[i, j])}")
+        fig = go.Figure(Choro(
+            geojson=gj, locations=locs, z=zz, featureidkey="id",
+            colorscale=cs, marker=dict(opacity=opacity, line=dict(width=0)),
+            colorbar=dict(title=lab), text=text, hoverinfo="text"))
+        if recep is not None:
+            fig.add_trace(Scatter(
+                lat=[recep[0]], lon=[recep[1]], mode="markers+text",
+                marker=dict(size=14, color=accent),
+                text=["受體站"], textposition="top right",
+                hoverinfo="text", name="受體站"))
+        fig.update_layout(
+            title=dict(text=title, x=0.01, xanchor="left"),
+            margin=dict(l=0, r=0, t=42, b=0), height=620,
+            **{layout_key: _basemap_cfg(basemap, dict(lat=lat_c, lon=lon_c), zoom)})
+        html = pio.to_html(fig, include_plotlyjs="cdn", full_html=True,
+                           config={"displaylogo": False, "scrollZoom": True})
+        ctx.save_html(html, name)
+
+
 def run(df, params, ctx):
     plt = get_plt(ctx.theme)
     traj_col = params.get("traj_col") or "traj_id"
@@ -69,6 +187,19 @@ def run(df, params, ctx):
     conc_col = params.get("conc_col") or "conc"
     grid = float(params.get("grid_size", 1.0))
     thr_pct = float(params.get("threshold_pct", 75))
+    basemap = (params.get("basemap") or "terrain")
+    try:
+        opacity = float(params.get("map_opacity", 0.6))
+    except Exception:
+        opacity = 0.6
+    opacity = min(max(opacity, 0.1), 1.0)
+    recep = None
+    try:
+        rla, rlo = params.get("recep_lat"), params.get("recep_lon")
+        if str(rla).strip() != "" and str(rlo).strip() != "":
+            recep = (float(rla), float(rlo))
+    except Exception:
+        recep = None
 
     for c in (traj_col, lat_col, lon_col, conc_col):
         if c not in df.columns:
@@ -146,10 +277,27 @@ def run(df, params, ctx):
         ax.set_xlabel("經度 lon"); ax.set_ylabel("緯度 lat"); ax.set_title(title)
         fig.tight_layout(); ctx.save_fig(fig, name)
 
+    # 互動式地圖（疊真實地形/地圖底圖，可縮放、平移、懸停看數值）
+    interactive = False
+    try:
+        _save_interactive_maps(ctx, lat_edges, lon_edges, n_cell, pscf, cwt,
+                               recep, basemap, opacity)
+        interactive = True
+        ctx.log(f"互動式地圖已輸出（底圖：{basemap}）：pscf_map_interactive.html、"
+                "cwt_map_interactive.html，可在網頁上縮放/平移/懸停看數值。")
+    except ImportError:
+        ctx.log("（未安裝 plotly，略過互動式地圖；pip install plotly 後，"
+                "即可把 PSCF/CWT 疊在真實地形/地圖底圖上互動檢視。）")
+    except Exception as e:
+        ctx.log(f"（互動式地圖產生失敗，已略過，不影響其他輸出：{e}）")
+
+    extra = ("已附『可縮放互動地圖』(HTML)，把網格半透明疊在真實地形/地圖底圖上，"
+             "可平移縮放、滑鼠懸停看每格數值。" if interactive
+             else "trajectory_grid.csv 可疊到地圖（QGIS/底圖）上呈現。")
     return ctx.result(summary=f"PSCF/CWT 完成：{len(grid_df)} 個網格。"
                               "PSCF 圖顯示『高濃度條件機率』最高的潛在源區；"
                               "CWT 圖進一步給出濃度權重的來源強度（可區分中度與強來源）。"
-                              "trajectory_grid.csv 可疊到地圖（QGIS/底圖）上呈現。")
+                              + extra)
 
 
 SPEC = MethodSpec(
@@ -167,6 +315,17 @@ SPEC = MethodSpec(
                   help="越小解析度越高，但每格端點數變少、雜訊變大。"),
         ParamSpec("threshold_pct", "高濃度百分位門檻", "float", default=75.0, minimum=50.0, maximum=95.0,
                   help="PSCF 用：到站濃度超過此百分位者視為高濃度軌跡。"),
+        ParamSpec("basemap", "互動地圖底圖", "choice", default="terrain",
+                  choices=["terrain", "topo", "satellite", "streets", "light", "none"],
+                  help="互動 HTML 地圖的底圖：terrain＝地形陰影、topo＝地形圖(含地名/等高線)、"
+                       "satellite＝衛星影像、streets＝街道(OSM)、light＝淺色、none＝純白底。"
+                       "圖磚免金鑰但需連網；未裝 plotly 則不產生互動地圖。"),
+        ParamSpec("map_opacity", "網格透明度", "float", default=0.6, minimum=0.1, maximum=1.0,
+                  help="PSCF/CWT 網格疊在地圖上的不透明度；越低越能看見底下地形。"),
+        ParamSpec("recep_lat", "受體站緯度（選填）", "text", default="",
+                  help="選填：在地圖上標記採樣受體站位置，如 23.5。留空則不標記。"),
+        ParamSpec("recep_lon", "受體站經度（選填）", "text", default="",
+                  help="選填：受體站經度，如 120.9。需與緯度一起填才會標記。"),
     ],
     schema=InputSchema(min_rows=10, min_numeric_cols=0,
                        required_param_cols=["traj_col", "lat_col", "lon_col", "conc_col"],

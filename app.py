@@ -375,6 +375,7 @@ def do_run():
         "figures": files_to_links(res.figures, run_id, run_dir),
         "tables": files_to_links(res.tables, run_id, run_dir),
         "extras": files_to_links(res.extras, run_id, run_dir),
+        "interactives": files_to_links(res.interactives, run_id, run_dir),
         "report": report_to_dict(rep),
     })
 

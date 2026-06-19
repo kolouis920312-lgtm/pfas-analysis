@@ -31,6 +31,7 @@ class RunContext:
         self.previews: list = []    # GUI 預覽 PNG
         self.tables: list = []
         self.extras: list = []
+        self.interactives: list = []   # 互動式 HTML（Plotly 地圖等）
         self._log: list = []
 
     # ── 訊息 ──────────────────────────────────────────
@@ -65,6 +66,14 @@ class RunContext:
     def add_extra(self, path: str):
         self.extras.append(path)
 
+    # ── 存互動式 HTML（如 Plotly 地圖；前端用 iframe 內嵌）────────
+    def save_html(self, html: str, name: str) -> str:
+        path = os.path.join(self.out.output_dir, f"{name}.html")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html)
+        self.interactives.append(path)
+        return path
+
     # ── 存圖（自動套格式/dpi，並產生預覽 PNG）──────────
     def save_fig(self, fig, name: str) -> str:
         import matplotlib.pyplot as plt
@@ -88,4 +97,5 @@ class RunContext:
     def result(self, summary: str = "") -> RunResult:
         return RunResult(figures=self.figures, previews=self.previews,
                          tables=self.tables, extras=self.extras,
+                         interactives=self.interactives,
                          log="\n".join(self._log), summary=summary)

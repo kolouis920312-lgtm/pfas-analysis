@@ -88,6 +88,7 @@ class RunResult:
     previews: list = field(default_factory=list)  # 給 GUI 預覽的 PNG
     tables: list = field(default_factory=list)     # 輸出的 CSV
     extras: list = field(default_factory=list)     # 其他檔案（如模型 json）
+    interactives: list = field(default_factory=list)  # 互動式 HTML（如 Plotly 地圖）
     log: str = ""
     summary: str = ""
 

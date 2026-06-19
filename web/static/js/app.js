@@ -440,8 +440,23 @@ async function onRun() {
 
 function renderResults(res) {
   $("#results").classList.remove("hidden");
+  const nInter = (res.interactives || []).length;
   $("#results-meta").textContent =
-    `${state.current.name}　·　圖 ${res.previews.length} 張、表 ${res.tables.length} 個`;
+    `${state.current.name}　·　圖 ${res.previews.length} 張、表 ${res.tables.length} 個`
+    + (nInter ? `、互動地圖 ${nInter} 張` : "");
+
+  // 互動式地圖（iframe 內嵌；可縮放 / 平移 / 滑鼠懸停看數值）
+  const inter = $("#interactives");
+  inter.innerHTML = "";
+  (res.interactives || []).forEach((f) => {
+    const item = document.createElement("div");
+    item.className = "interactive-item";
+    item.innerHTML =
+      `<div class="cap">🗺 ${escapeHtml(f.name)}` +
+      `<a href="${f.url}" target="_blank" rel="noopener">在新分頁開啟</a></div>` +
+      `<iframe src="${f.url}" loading="lazy" title="${escapeHtml(f.name)}"></iframe>`;
+    inter.appendChild(item);
+  });
 
   // 圖像預覽
   const prev = $("#previews");
@@ -461,7 +476,7 @@ function renderResults(res) {
   // 下載（圖檔 + 表格 + 其他）
   const dl = $("#downloads");
   dl.innerHTML = "";
-  const all = [].concat(res.figures, res.tables, res.extras);
+  const all = [].concat(res.figures, res.tables, res.extras, res.interactives || []);
   if (!all.length) {
     dl.innerHTML = `<p class="hint">沒有可下載的檔案。</p>`;
   }
