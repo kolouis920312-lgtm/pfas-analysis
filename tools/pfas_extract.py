@@ -73,7 +73,7 @@ def load_category_map(db):
         paper2cats[paper] = cats
         for c in cats:
             cat2papers.setdefault(c, []).append(paper)
-    return pm, cat2papers
+    return pm, cat2papers, paper2cats
 
 
 def compound_columns(cols, cfg, drop_x_prefix=True):
@@ -87,8 +87,62 @@ def compound_columns(cols, cfg, drop_x_prefix=True):
     return comps
 
 
+def export_denormalized(args, paper2cats):
+    """把整個資料庫攤平成一張 CSV（含 category 欄）→ 上傳網站版用『PFAS 指紋 HCA』線上切。"""
+    cfg = SHEETS[args.values]
+    df = pd.read_excel(args.db, sheet_name=cfg["sheet"])
+    comps = compound_columns(df.columns, cfg)
+    stat_col = cfg.get("stat_col")
+    if stat_col and stat_col in df.columns and args.stat_type.lower() != "all":
+        sv = df[stat_col].astype(str).str.strip().str.lower()
+        df = (df[sv.isin(INDIVIDUAL_STATS)] if args.stat_type.lower() == "individual"
+              else df[sv == args.stat_type.strip().lower()])
+    df = df.reset_index(drop=True)
+
+    def to_int(p):
+        try:
+            return int(float(p))
+        except Exception:
+            return None
+    pap = df[cfg["paper_col"]]
+    primary = [(paper2cats.get(to_int(p)) or [""])[0] for p in pap]
+    allcats = ["|".join(paper2cats.get(to_int(p), [])) for p in pap]
+    rid = (df[cfg["rowid_col"]].astype(str) if cfg["rowid_col"] and cfg["rowid_col"] in df.columns
+           else pd.Series([str(i) for i in range(len(df))]))
+    out = pd.DataFrame({
+        "sample_id": ["r" + s for s in rid],
+        "category": primary, "categories_all": allcats,
+        "phase": df[cfg["phase_col"]].values if cfg["phase_col"] in df.columns else "",
+        "paper": pap.values,
+        "country": df[cfg["country_col"]].values if cfg["country_col"] in df.columns else "",
+        "stat_type": df[stat_col].values if (stat_col and stat_col in df.columns) else "",
+    })
+    comp_df = df[comps].apply(pd.to_numeric, errors="coerce")
+    comp_df.index = out.index
+    out = pd.concat([out, comp_df], axis=1)
+
+    if args.explode_categories:
+        pairs = []
+        for i in range(len(out)):
+            for c in (paper2cats.get(to_int(pap.iloc[i]), []) or [""]):
+                pairs.append((i, c))
+        out = out.iloc[[i for i, _ in pairs]].reset_index(drop=True)
+        out["category"] = [c for _, c in pairs]
+        out["sample_id"] = [f"{s}__{c}" for s, c in zip(out["sample_id"], out["category"])]
+
+    os.makedirs(args.outdir, exist_ok=True)
+    path = os.path.join(args.outdir, (args.prefix or "denormalized_all") + ".csv")
+    out.to_csv(path, index=False, encoding="utf-8-sig")
+    na = int(out[comps].isna().sum().sum())
+    print(f"攤平輸出 ✓：{path}")
+    print(f"  {len(out)} 列 × {len(comps)} 化合物（沒測空白 {na} 格）"
+          + ("；已依類別展開（一列＝一個樣本×類別）" if args.explode_categories
+             else "；category＝主類別、categories_all＝全部標籤"))
+    print("  → 上傳網站版，用『PFAS 指紋 HCA』：類別欄選 category、勾要保留的類別值即可線上切子集。")
+
+
 def list_categories(db):
-    pm, cat2papers = load_category_map(db)
+    pm, cat2papers, _ = load_category_map(db)
     rec = pd.read_excel(db, sheet_name="records_分析數值", usecols=["論文編號", "採集的相態"])
     by_paper = rec["論文編號"].value_counts().to_dict()
     print(f"資料庫：{db}")
@@ -111,6 +165,10 @@ def main():
     ap = argparse.ArgumentParser(description="從 PFAS 彙整資料庫抽子集 → toolkit 可用 CSV")
     ap.add_argument("--db", default=DEFAULT_DB, help="彙整資料庫 xlsx 路徑")
     ap.add_argument("--list-categories", action="store_true", help="列出 24 大類與筆數後結束")
+    ap.add_argument("--denormalized", action="store_true",
+                    help="攤平整庫成一張 CSV（含 category 欄）→ 上傳網站版用『PFAS 指紋 HCA』線上切")
+    ap.add_argument("--explode-categories", action="store_true",
+                    help="搭配 --denormalized：一列＝一個(樣本×類別)，讓網頁 category 精確篩選涵蓋多重歸類")
     ap.add_argument("--category", help="要抽的大類代碼（如 URBN、WWTP、POLR…）")
     ap.add_argument("--phase", default="all",
                     help="相態子字串過濾：particle / gas / 固態 / 液態 / all（預設 all 不過濾）")
@@ -141,11 +199,16 @@ def main():
         list_categories(args.db)
         return
 
+    pm, cat2papers, paper2cats = load_category_map(args.db)
+
+    if args.denormalized:
+        export_denormalized(args, paper2cats)
+        return
+
     if not args.category:
-        sys.exit("請用 --category 指定大類（或 --list-categories 先看有哪些）。")
+        sys.exit("請用 --category 指定大類（或 --list-categories 先看有哪些；或 --denormalized 攤平整庫）。")
 
     cfg = SHEETS[args.values]
-    pm, cat2papers = load_category_map(args.db)
     if args.category not in cat2papers:
         sys.exit(f"類別「{args.category}」不存在。可用：{', '.join(sorted(cat2papers))}")
     papers = set(cat2papers[args.category])
