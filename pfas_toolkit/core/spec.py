@@ -49,6 +49,7 @@ class InputSchema:
     required_param_cols: list = field(default_factory=list)  # 必填的欄位型參數 key
     check_bdl: bool = False                 # 是否檢查 BDL/零比例並對 >70% 警告
     note: str = ""                          # 額外備註（顯示在驗證面板）
+    missing_policy_note: str = ""           # 缺值處理說明（覆蓋驗證面板預設的「中位數補值」字樣）
 
 
 @dataclass

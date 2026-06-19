@@ -217,7 +217,9 @@ SPEC = MethodSpec(
                   minimum=0.0,
                   help="填 > 0 改用距離切群：樹狀圖在此高度橫切，距離低於此值的樣本算同一組。"),
     ],
-    schema=InputSchema(min_rows=4, min_numeric_cols=2, id_col_param="id_col"),
+    schema=InputSchema(min_rows=4, min_numeric_cols=2, id_col_param="id_col",
+                       missing_policy_note="euclidean 距離以各欄中位數補值；braycurtis/aitchison "
+                                           "取核心盤後剔除含缺值的列（不補值）"),
     template_columns=["sample_id", "feature_1", "feature_2", "feature_3", "…"],
     uses_colors=["primary", "accent", "cmap_categorical"],
 )

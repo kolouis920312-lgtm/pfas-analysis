@@ -121,7 +121,8 @@ def validate(df: pd.DataFrame, spec, params: dict) -> ValidationReport:
     if numeric_cols:
         nan = int(df[numeric_cols].isna().sum().sum())
         if nan:
-            warnings.append(f"偵測到 {nan} 個缺值 → 執行時將以各欄中位數補值。")
+            note = getattr(spec.schema, "missing_policy_note", "") or "執行時將以各欄中位數補值"
+            warnings.append(f"偵測到 {nan} 個缺值 → {note}。")
         if spec.schema.check_bdl:
             arr = df[numeric_cols].to_numpy(dtype=float, na_value=np.nan)
             if arr.size:
