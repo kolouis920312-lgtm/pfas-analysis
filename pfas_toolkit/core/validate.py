@@ -14,13 +14,19 @@ import pandas as pd
 
 from .spec import ValidationReport
 
-# 常見「應該是數字卻被寫成文字」的 BDL 記號
-_BDL_TOKENS = ("nd", "n.d.", "bdl", "<mdl", "<lod", "<dl", "未檢出", "na", "n/a")
+# 「整格剛好等於」這些才算 BDL 文字（避免 'China' 含 'na'、'land' 含 'nd' 之類的誤判）
+_BDL_EXACT = {"nd", "n.d.", "bdl", "na", "n/a", "n.a.", "未檢出", "未检出",
+              "not detected", "<lod", "<mdl", "<dl", "<loq"}
+# 這些「子字串」出現就算（不等式記號不會誤傷一般文字/地名）
+_BDL_SUBSTR = ("<lod", "<mdl", "<dl", "<loq", "< lod", "< mdl")
 
 
 def _looks_like_bdl_text(series: pd.Series) -> bool:
     vals = series.dropna().astype(str).str.strip().str.lower().unique()
-    return any(any(tok in v for tok in _BDL_TOKENS) for v in vals[:50])
+    for v in vals[:50]:
+        if v in _BDL_EXACT or any(tok in v for tok in _BDL_SUBSTR):
+            return True
+    return False
 
 
 def validate(df: pd.DataFrame, spec, params: dict) -> ValidationReport:
