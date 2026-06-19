@@ -60,6 +60,15 @@ SHEETS = {
 INDIVIDUAL_STATS = {"raw", "individual", "measured", "sample"}
 
 
+def clean_int_col(series):
+    """整數值欄（如論文編號、年份）轉 pandas 可空整數，避免 CSV 出現 190.0（含 NaN 時被當 float）。
+    非整數值（如字串 ID）則原樣回傳。"""
+    pn = pd.to_numeric(series, errors="coerce")
+    if pn.notna().any() and (pn.dropna() % 1 == 0).all():
+        return pn.astype("Int64")
+    return series
+
+
 def load_category_map(db):
     pm = pd.read_excel(db, sheet_name="paper_meta")
     paper2cats, cat2papers = {}, {}
@@ -117,6 +126,7 @@ def export_denormalized(args, paper2cats):
         "country": df[cfg["country_col"]].values if cfg["country_col"] in df.columns else "",
         "stat_type": df[stat_col].values if (stat_col and stat_col in df.columns) else "",
     })
+    out["paper"] = clean_int_col(out["paper"])
     comp_df = df[comps].apply(pd.to_numeric, errors="coerce")
     comp_df.index = out.index
     out = pd.concat([out, comp_df], axis=1)
@@ -307,6 +317,7 @@ def main():
     if cfg["year_col"] and cfg["year_col"] in sub:
         meta_cols["year"] = sub[cfg["year_col"]].values
     meta = pd.DataFrame(meta_cols)
+    meta["paper"] = clean_int_col(meta["paper"])
     meta_csv = os.path.join(args.outdir, f"{prefix}_meta.csv")
     meta.to_csv(meta_csv, index=False, encoding="utf-8-sig")
 

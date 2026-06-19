@@ -29,7 +29,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pfas_extract import (DEFAULT_DB, SHEETS, INDIVIDUAL_STATS,
-                          load_category_map, compound_columns)
+                          load_category_map, compound_columns, clean_int_col)
 
 
 def main():
@@ -114,6 +114,9 @@ def main():
             meta["year"] = sub[cfg["year_col"]].values
         out = pd.concat([pd.DataFrame(meta).reset_index(drop=True),
                          comp_sub[nonempty].reset_index(drop=True)], axis=1)
+        out["paper"] = clean_int_col(out["paper"])          # 論文編號轉整數，避免 190.0
+        if "year" in out.columns:
+            out["year"] = clean_int_col(out["year"])
 
         path = os.path.join(args.outdir, f"{cat}.csv")
         out.to_csv(path, index=False, encoding="utf-8-sig")
