@@ -130,6 +130,8 @@ def run(df, params, ctx):
     missing_mode = params.get("missing_mode", "complete")
     min_shared = int(params.get("min_shared", 5) or 5)
     auto_k = bool(params.get("auto_k", True))
+    _kt = params.get("parsimony_tol", 0.02)
+    k_tol = float(_kt) if _kt not in (None, "") else 0.02   # 0＝純 argmax；不可用 or 帶預設
     n_clusters = int(params.get("n_clusters", 3))
     max_k = int(params.get("max_clusters", 8))
     dl_factor = float(params.get("dl_factor", 0.65))
@@ -177,14 +179,15 @@ def run(df, params, ctx):
         coph, _ = cophenet(Z, cond)
         ks = list(range(2, min(max_k, silX.shape[0] - 1) + 1))
         if auto_k and len(ks) >= 1:
-            bestk, sils = _best_k(Z, silX, silm, ks, fcluster, silhouette_score)
+            bestk, sils = _best_k(Z, silX, silm, ks, fcluster, silhouette_score, tol=k_tol)
             amax = ks[int(np.nanargmax(sils))] if not np.all(np.isnan(sils)) else bestk
             if amax != bestk:
                 ctx.log(f"（{dname}：silhouette 在 k={amax} 最高，但 k={bestk} 已在近似最佳範圍內，"
                         "採較精簡的 k 以免把近似的子型態過度切開）")
             if bestk == ks[-1]:
                 ctx.log(f"（{dname}：最佳 k 落在掃描上限 {ks[-1]}，可能仍在過度切分；"
-                        "可調高 max_clusters 或關閉 auto_k 改指定群數，並對照 silhouette 曲線）")
+                        "可調高 max_clusters、調高『群數精簡容差』、或關閉 auto_k 改指定群數，"
+                        "並對照 silhouette 曲線）")
             fig, ax = plt.subplots(figsize=(6, 4))
             ax.plot(ks, sils, marker="o", color=primary)
             ax.axvline(bestk, color=accent, ls="--", label=f"最佳 k={bestk}")
@@ -371,6 +374,11 @@ SPEC = MethodSpec(
                   help="關閉自動選群數時，固定切成這麼多群。"),
         ParamSpec("max_clusters", "silhouette 掃描的最大群數", "int", default=8, minimum=2,
                   help="自動選群數時，掃描 2～此值的範圍。"),
+        ParamSpec("parsimony_tol", "群數精簡容差（silhouette）", "float", default=0.02,
+                  minimum=0.0, maximum=0.2,
+                  help="僅自動選群數時：在最高 silhouette 的此容差內，取最精簡（最小）的群數，"
+                       "避免把幾乎相同的子型態過度切開。0＝純取最高分（最容易過度切分）；"
+                       "0.02~0.05 較精簡；覺得切太多群可調高。"),
         ParamSpec("dl_factor", "零替換係數 ×偵測極限", "float", default=0.65, minimum=0.1, maximum=1.0,
                   help="BDL(0) 的乘法零替換值＝係數 × 各化合物最小正值（CLR 前處理）。"),
     ],
@@ -405,6 +413,7 @@ SPEC.manual = {
         "- **核心盤覆蓋率門檻**:只留有測比例≥此值的化合物。建議 0.3~0.6。\n"
         "- **缺值處理模式**:complete(完整觀測、可雙距離) 或 pairwise(逐對共同測項、僅 BC)。\n"
         "- **最少共同測項數**:pairwise 模式下,兩樣本共同測項少於此數就不採信其距離(預設 5)。\n"
+        "- **群數精簡容差**:自動選群數時,在最高 silhouette 此容差內取最小群數;覺得群切太多可調高(預設 0.02,0＝純取最高分)。\n"
         "- **距離**:complete 模式可 both(BC＋CLR);pairwise 固定 BC。\n"
         "- **論文欄 / 國家欄**:填了才會輸出批次效應交叉表。"
     ),
