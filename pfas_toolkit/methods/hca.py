@@ -1,12 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-hca.py — 階層式分群 HCA（由 hca_analysis.py 整合而來）
-輸出：樹狀圖 / 群數評估圖 / 各群輪廓圖 / hca_results.csv
-距離可選：
-  euclidean   標準化後歐氏距離（Ward；一般數值資料）
-  braycurtis  Bray–Curtis 相異度（先列封閉成組成比例；適合 PFAS 占比指紋）
-  aitchison   CLR 轉換後歐氏距離（= Aitchison 距離；組成資料較嚴謹）
-另輸出 cophenetic correlation（樹是否忠實保留原始距離；>0.8 可信）。
+hca.py — HCA 階層式分群（雙模式合併）
+================================================================================
+一個方法、兩種模式（由「資料類型」開關 data_kind 切換）：
+
+  ‧ 一般數值（標準化歐氏）：任何數值寬表 → StandardScaler ＋ 距離（歐氏／Bray–Curtis／
+    CLR-Aitchison）＋ 連結法（ward…）＋ 群數或距離門檻切群。
+    輸出樹狀圖／群數評估（silhouette、Calinski-Harabasz）／各群輪廓 ＋ cophenetic correlation。
+
+  ‧ PFAS 組成（占比指紋）：跨研究 PFAS 占比資料的組成分群（沿用組成方法學引擎 pfas_hca）：
+    核心盤覆蓋率 ＋ complete／pairwise 缺值 ＋ Bray–Curtis／CLR 雙距離 ＋ silhouette 自動選 k
+    （取近似最佳中最精簡）＋ 合併整群的組成中心指紋 ＋ cluster×論文／國家 批次交叉表；
+    沒測（空白）全程不當 0。
+
+由原 hca（通用）與 pfas_hca（PFAS 組成）合併而成。組成模式的引擎仍放在 pfas_hca.py，
+但 pfas_hca 不再於 methods/__init__ 註冊為獨立方法 —— 網站只剩這一個 HCA 入口。
 """
 import numpy as np
 import pandas as pd
@@ -15,18 +23,10 @@ from ..core.spec import MethodSpec, ParamSpec, InputSchema
 from ..core.theme import get_plt
 from ..core.prep import numeric_frame, cluster_members_table
 
-
-def make_demo(n_samples=200, n_features=8, n_groups=3, seed=42):
-    rng = np.random.default_rng(seed)
-    centers = rng.normal(0, 5, size=(n_groups, n_features))
-    rows, ids = [], []
-    for i in range(n_samples):
-        g = i % n_groups
-        rows.append(centers[g] + rng.normal(0, 1.5, size=n_features))
-        ids.append(f"S{i+1:03d}")
-    df = pd.DataFrame(rows, columns=[f"feature_{j+1}" for j in range(n_features)])
-    df.insert(0, "sample_id", ids)
-    return df
+# PFAS 組成模式：沿用原 pfas_hca 引擎（同檔保留邏輯，未獨立註冊為方法）。
+# make_demo 也用組成版：其資料為正值濃度＋NaN（沒測）＋BDL(0)，一般模式與組成模式皆可跑；
+# 反之通用版 demo 含負值，會讓組成模式的列封閉／CLR 失效，故統一用組成版 demo。
+from .pfas_hca import run as _run_compositional, make_demo as make_demo  # noqa: F401
 
 
 def _representation(X, metric, method, ctx):
@@ -64,7 +64,8 @@ def _representation(X, metric, method, ctx):
     return Z, cond, rep, "euclidean", prof, "標準化均值"
 
 
-def run(df, params, ctx):
+def _run_general(df, params, ctx):
+    """一般數值模式：標準化後階層式分群（原 hca 邏輯）。"""
     from sklearn.metrics import silhouette_score, calinski_harabasz_score
     from scipy.cluster.hierarchy import dendrogram, fcluster, cophenet
     plt = get_plt(ctx.theme)
@@ -183,44 +184,105 @@ def run(df, params, ctx):
             mtxt = mtxt[:160] + " …"
         ctx.log(f"群{int(r['Cluster'])}（{int(r['n'])} 筆）：{mtxt}")
     cut_desc = (f"距離門檻 {dist_thr:g} → {n_eff} 群" if use_dist else f"{n_clusters} 群")
-    return ctx.result(summary=f"HCA 完成（{metric}，{method}，{cut_desc}）。"
+    return ctx.result(summary=f"HCA 完成（一般數值模式，{metric}，{method}，{cut_desc}）。"
                               "hca_results.csv 的 HCA_Cluster 欄可當回歸類別特徵；"
                               "hca_cluster_members.csv 列出每群各有哪些樣本。"
-                              "Cophenetic correlation 已記於執行紀錄，可判斷樹是否可信。")
+                              "Cophenetic correlation 已記於執行紀錄，可判斷樹是否可信。"
+                              "（PFAS 占比/組成資料請把『資料類型』切成 PFAS 組成模式。）")
+
+
+def run(df, params, ctx):
+    """依『資料類型』分派：一般數值 → 標準化歐氏路徑；PFAS 組成 → 占比指紋引擎。"""
+    kind = str(params.get("data_kind", "一般數值（標準化歐氏）"))
+    is_comp = ("PFAS" in kind) or ("組成" in kind) or kind.lower().startswith("comp")
+    if is_comp:
+        p2 = dict(params)
+        # 組成模式未設核心盤覆蓋率 → 給合理預設 0.5（一般模式維持 0＝不過濾）
+        if p2.get("min_coverage") in (None, "", 0, 0.0):
+            p2["min_coverage"] = 0.5
+            ctx.log("（PFAS 組成模式：未設核心盤覆蓋率 → 採預設 0.5；可在參數調整）")
+        return _run_compositional(df, p2, ctx)
+    return _run_general(df, params, ctx)
 
 
 SPEC = MethodSpec(
     key="hca",
-    name="HCA 階層式分群",
-    summary="標準化後做階層式分群，輸出樹狀圖、群數評估與各群特徵輪廓；距離可選 Euclidean / Bray–Curtis / CLR-Aitchison，並報 cophenetic correlation。",
+    name="HCA 階層式分群（通用 + PFAS 指紋組成）",
+    summary="一個方法兩種模式：一般數值（標準化歐氏，輸出樹狀圖／群數評估／各群輪廓＋cophenetic），"
+            "或切換『PFAS 組成模式』做占比指紋分群（核心盤覆蓋率＋Bray–Curtis/CLR 雙距離＋silhouette "
+            "自動選 k＋合併整群指紋＋cluster×論文/國家 批次交叉表；缺值可完整觀測或逐對共同測項，沒測不當 0）。",
     params=[
-        ParamSpec("id_col", "ID 欄（可空）", "column", default="", optional=True),
-        ParamSpec("target_col", "排除欄/標籤欄（可空）", "column", default="", optional=True),
-        ParamSpec("feature_cols", "納入的特徵欄（不選＝全部）", "columns", default=[],
-                  help="勾選要納入分群的數值欄；不勾就用全部。"),
-        ParamSpec("distance_metric", "距離類型", "choice", default="euclidean",
-                  choices=["euclidean", "braycurtis", "aitchison"],
-                  help="euclidean＝標準化後歐氏（一般數值）；braycurtis＝先列封閉成組成比例再算"
-                       "Bray–Curtis（PFAS 占比指紋）；aitchison＝CLR 轉換後歐氏（組成資料較嚴謹）。"
-                       "選 braycurtis/aitchison 時會保留『沒測=空白』語意：取核心盤後丟棄含缺值的列。"),
-        ParamSpec("min_coverage", "核心盤覆蓋率門檻（0=不過濾）", "float", default=0.0,
-                  minimum=0.0, maximum=1.0,
-                  help="只保留『有測比例 ≥ 此值』的化合物欄，避免把測得太少的欄硬補值。"
-                       "跨研究 PFAS 建議 0.2~0.5。"),
+        ParamSpec("data_kind", "資料類型（模式切換）", "choice",
+                  default="一般數值（標準化歐氏）",
+                  choices=["一般數值（標準化歐氏）", "PFAS 組成（占比指紋）"],
+                  help="一般數值＝任何數值表，標準化後歐氏/連結法分群（最穩、最不挑資料）。"
+                       "PFAS 組成＝PFAS 占比指紋的組成資料分群（核心盤＋BC/CLR＋自動選k＋批次交叉表，"
+                       "沒測留空白不當 0）；上傳 PFAS 化合物濃度/占比寬表時請選這個。"),
+        # ── 共用 ──
+        ParamSpec("id_col", "樣本 ID 欄（可空）", "column", default="sample_id", optional=True,
+                  help="每列樣本的識別欄；樹狀圖葉子會顯示它。留空則自動編號。"),
+        ParamSpec("feature_cols", "特徵／化合物欄（不選＝自動全部數值欄）", "columns", default=[],
+                  help="勾選要分群的數值欄（PFAS 模式即化合物欄）；不勾就用全部數值欄"
+                       "（會自動忽略 ID／類別／論文／國家等非數值欄）。"),
+        ParamSpec("n_clusters", "切割群數", "int", default=3, minimum=2,
+                  help="切成幾群。一般模式：距離門檻=0 時生效。PFAS 模式：關閉自動選群數時生效。"),
+        ParamSpec("max_clusters", "群數評估／掃描上限", "int", default=8, minimum=2,
+                  help="群數評估圖、或自動選群數掃描 2～此值。"),
+        ParamSpec("min_coverage", "核心盤覆蓋率門檻", "float", default=0.0, minimum=0.0, maximum=1.0,
+                  help="只保留『有測比例 ≥ 此值』的欄（核心盤），其餘測得太少者剔除（不補值）。"
+                       "0＝不過濾（一般模式預設）；PFAS 組成模式未設時自動採 0.5，建議 0.3~0.6。"),
+        # ── 一般數值模式 ──
+        ParamSpec("target_col", "排除欄／標籤欄（可空）", "column", default="", optional=True,
+                  help="【一般模式】要從特徵中排除的欄（如標籤欄）。"),
         ParamSpec("linkage_method", "連結方法", "choice", default="ward",
                   choices=["ward", "complete", "average", "single"],
-                  help="ward 僅適用 euclidean/aitchison；braycurtis 會自動改用 average。"),
-        ParamSpec("max_clusters", "評估的最大群數", "int", default=10, minimum=2),
-        ParamSpec("n_clusters", "最終切割群數", "int", default=4, minimum=2,
-                  help="先看樹狀圖與評估圖再決定。距離門檻 > 0 時此項會被忽略。"),
-        ParamSpec("distance_threshold", "距離門檻（0=用群數切）", "float", default=0.0,
-                  minimum=0.0,
-                  help="填 > 0 改用距離切群：樹狀圖在此高度橫切，距離低於此值的樣本算同一組。"),
+                  help="【一般模式】兩群距離定義。ward 最穩（搭歐氏/CLR）；選 Bray–Curtis 時自動改 average。"),
+        ParamSpec("distance_metric", "距離類型（一般模式）", "choice", default="euclidean",
+                  choices=["euclidean", "braycurtis", "aitchison"],
+                  help="【一般模式】euclidean＝標準化後歐氏（一般數值）；braycurtis＝列封閉成占比的"
+                       "Bray–Curtis；aitchison＝CLR 轉換後歐氏（組成資料）。"),
+        ParamSpec("distance_threshold", "距離門檻（0＝用群數切）", "float", default=0.0, minimum=0.0,
+                  help="【一般模式】填 > 0 改用距離切群：樹狀圖在此高度橫切，距離低於此值的樣本算同一組，"
+                       "群數由資料自動決定。"),
+        # ── PFAS 組成模式 ──
+        ParamSpec("distance", "距離（組成 complete 模式）", "choice", default="both",
+                  choices=["both", "braycurtis", "aitchison"],
+                  help="【PFAS 組成模式】both＝同時跑 Bray–Curtis 與 CLR-Aitchison（建議對照）；"
+                       "pairwise 缺值模式固定為 BC。"),
+        ParamSpec("missing_mode", "缺值處理模式（組成）", "choice", default="complete",
+                  choices=["complete", "pairwise"],
+                  help="【PFAS 組成模式】complete＝核心盤完整觀測（含缺值列剔除，可雙距離，較嚴謹）；"
+                       "pairwise＝保留部分測量樣本，逐對只用共同測項算 Bray–Curtis。"),
+        ParamSpec("min_shared", "pairwise：最少共同測項數", "int", default=5, minimum=2,
+                  help="【PFAS 組成 pairwise】兩樣本共同測得的化合物若少於此數→設最大距離，"
+                       "避免靠少數共同測項假裝相似。"),
+        ParamSpec("auto_k", "用 silhouette 自動選群數（組成）", "bool", default=True,
+                  help="【PFAS 組成模式】開啟＝自動選群數（在近似最佳 silhouette 中取最精簡 k，避免過度切分）；"
+                       "關閉＝用上面『切割群數』。"),
+        ParamSpec("parsimony_tol", "群數精簡容差（silhouette）", "float", default=0.02,
+                  minimum=0.0, maximum=0.2,
+                  help="【PFAS 組成 自動選群數】在最高 silhouette 此容差內取最精簡（最小）群數；"
+                       "覺得群切太多可調高。0＝純取最高分（最容易過度切分）。"),
+        ParamSpec("dl_factor", "零替換係數 ×偵測極限（組成）", "float", default=0.65,
+                  minimum=0.1, maximum=1.0,
+                  help="【PFAS 組成模式】BDL(0) 的乘法零替換值＝係數 × 各化合物最小正值（CLR 前處理）。"),
+        ParamSpec("filter_col", "類別／相態欄（可空，篩子集）", "column", default="", optional=True,
+                  help="【PFAS 組成模式】例如 category 或 phase；配合下面的值選取，只跑某子集"
+                       "（如某相態，避免跨相態混分）。"),
+        ParamSpec("filter_values", "要保留的值（不選＝全部）", "values", default=[],
+                  source_col="filter_col",
+                  help="【PFAS 組成模式】選好上面的欄、載入資料後，這裡會列出可勾選的值（如 氣態-gas）。"),
+        ParamSpec("paper_col", "論文欄（可空，批次交叉表）", "column", default="", optional=True,
+                  help="【PFAS 組成模式】填了才輸出 cluster×論文 交叉表，看某群是否幾乎只來自同一篇（批次效應）。"),
+        ParamSpec("country_col", "國家欄（可空，批次交叉表）", "column", default="", optional=True,
+                  help="【PFAS 組成模式】填了才輸出 cluster×國家 交叉表。"),
     ],
-    schema=InputSchema(min_rows=4, min_numeric_cols=2, id_col_param="id_col",
-                       missing_policy_note="euclidean 距離以各欄中位數補值；braycurtis/aitchison "
-                                           "取核心盤後剔除含缺值的列（不補值）"),
-    template_columns=["sample_id", "feature_1", "feature_2", "feature_3", "…"],
+    schema=InputSchema(min_rows=4, min_numeric_cols=2, id_col_param="id_col", check_bdl=True,
+                       note="寬表：每列一個樣本，每欄一個特徵/化合物。"
+                            "PFAS 組成模式：沒測請留空白（不要填 0），BDL 才填 0。",
+                       missing_policy_note="一般 euclidean 以各欄中位數補值；braycurtis/aitchison 與 PFAS "
+                                           "組成模式取核心盤後做完整觀測或逐對共同測項，沒測一律不補值。"),
+    template_columns=["sample_id", "feature_1 / PFOA", "feature_2 / PFOS", "feature_3 / …"],
     uses_colors=["primary", "accent", "cmap_categorical"],
 )
 SPEC.run = run

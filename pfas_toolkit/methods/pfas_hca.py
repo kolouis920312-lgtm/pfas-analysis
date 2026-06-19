@@ -2,6 +2,10 @@
 """
 pfas_hca.py — PFAS 指紋 HCA（組成資料專用的階層式分群）
 ================================================================================
+※ 本模組現為 hca.py「PFAS 組成模式」的內部引擎，已不在 methods/__init__ 註冊為獨立方法
+  （網站只剩一個 HCA 入口）。下方 SPEC 保留作參數/說明參考，但不被 all_specs() 收集。
+  run() 與 make_demo() 由 hca.py import 使用。
+--------------------------------------------------------------------------------
 把跨研究 PFAS 占比資料做「來源指紋」分群，嚴格遵守組成資料方法學：
 
   ‧ 沒測(not measured)=空白(NaN)，未檢出(BDL)=0，真 0 三者不同 → 沒測不補 0、不補中位數。
@@ -124,7 +128,7 @@ def run(df, params, ctx):
     filter_vals = as_list(params.get("filter_values"))
     paper_col = params.get("paper_col") or ""
     country_col = params.get("country_col") or ""
-    comp_sel = as_list(params.get("compound_cols"))
+    comp_sel = as_list(params.get("compound_cols") or params.get("feature_cols"))
     min_cov = float(params.get("min_coverage", 0.5) or 0)
     dist_opt = params.get("distance", "both")
     missing_mode = params.get("missing_mode", "complete")
