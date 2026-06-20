@@ -17,3 +17,7 @@ Thumbs.db
 
 # Claude Code 本機設定（不放進公開 repo）
 .claude/
+
+# 本機資料/文獻（不放進公開 repo：著作權＋體積）
+Koa文獻/
+PhysChemProp_Table_Aug2025_FINAL.xlsx
