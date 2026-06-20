@@ -1,9 +1,9 @@
-﻿compound,log_KOA
-4:2 FTOH,5.6
-6:2 FTOH,6.4
-8:2 FTOH,7.2
-10:2 FTOH,8.0
-FOSA,8.3
-MeFOSE,8.9
-EtFOSE,9.2
-MeFOSA,9.8
+﻿compound,class,Cn,log_KOA,pL_Pa
+4:2 FTOH,neutral,,5.6,8.0
+6:2 FTOH,neutral,,6.4,3.0
+8:2 FTOH,neutral,,7.2,0.25
+10:2 FTOH,neutral,,8.0,0.012
+FOSA,neutral,,8.3,0.005
+MeFOSE,neutral,,8.9,0.0015
+EtFOSE,neutral,,9.2,0.0007
+PFBA,PFCA,4,,
