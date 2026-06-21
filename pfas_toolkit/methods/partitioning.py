@@ -14,7 +14,8 @@ partitioning.py — 氣粒分配（多模型：KOA / Junge–Pankow / 雙模型 
   (D) 穩態 L–M–Y（Li–Ma–Yang）             lg Kp_S = lg Kp_E + lg α（含沉降損失）    Kp[m³/µg]
   (E) 離子型 PFAA 鏈長式（Yamazaki 2021）   lg Kp = 0.38·Cn−1.49(PFSA) / 0.2·Cn−2.35(PFCA)  Kp[m³/mg]
   (F) pp-LFER（Arp；Okeme 2018）           lg Kp = 1.01S+3.17A+0.30B+0.78L+0.51V−7.42       Kp[m³/g]
-  (G) ML 參考（本專案內建）                  階層貝氏＋設限感知，38 支 PFAS 的 φ@25°C＋89% 可信區間（已驗證基準）
+  (G) ML 參考（本專案內建）                  階層貝氏＋設限感知，38 支 PFAS 的 φ＋89% 可信區間（已驗證基準；可隨溫度內插 5–35°C）
+  (H) ML 鏈長式（本專案內建）                各族 log10Kp(m³/µg)=slope·Cn+intercept（由 ML φ 反推；可調 TSP；修正 Yamazaki PFCA）
 
 三式 Kp 單位不同（µg / mg / g），φ = Kp·TSP/(1+Kp·TSP) 時 TSP 會各自換算。
 KOA 可隨溫度校正：lg KOA(T) = A + B/T（提供 A、B 欄時）。fom／TSP／θ 由「地區」預設帶入
@@ -46,9 +47,20 @@ MODEL_STEADY = "穩態 L–M–Y（非平衡）"
 MODEL_IONIC = "離子型 PFAA 鏈長式（Yamazaki）"
 MODEL_LFER = "pp-LFER（多參數）"
 MODEL_ML = "ML 參考（內建貝氏，38 支 PFAS）"
+MODEL_MLCHAIN = "ML 鏈長式（各族，可調 TSP）"
 
+# ML 導出的各族鏈長式：log10 Kp(m³/µg) = slope·Cn + intercept
+# 由本專案 ML φ@25°C 反推 Kp（以 TSP_ref≈35 µg/m³ PM10 校準）再對碳數擬合而得；
+# 單位 m³/µg（與 KOA 模型一致、可調 TSP）。PFCA/PFSA 高信心；FTS 僅 3 點為低信心。
+# 相對 Yamazaki：修正其長鏈 PFCA 嚴重低估（PFCA R² 0.20→0.86），且單位更一致。
+ML_CHAIN_COEF = {
+    "PFCA": dict(slope=0.172, intercept=-3.074, r2=0.86, n=14, conf="高"),
+    "PFSA": dict(slope=0.190, intercept=-2.804, r2=0.92, n=8,  conf="高"),
+    "FTS":  dict(slope=0.162, intercept=-2.245, r2=0.46, n=3,  conf="低"),
+}
 
 _ML_REF_CACHE = None
+_ML_TEMP_CACHE = None
 
 
 def _load_ml_reference():
@@ -65,6 +77,22 @@ def _load_ml_reference():
         except Exception:
             _ML_REF_CACHE = pd.DataFrame()
     return _ML_REF_CACHE
+
+
+def _load_ml_temp():
+    """載入 ML 溫度曲線（38 支 × 7 溫度 5–35°C 的 φ；供 ML 參考做溫度內插）。
+    來源：_stage3_full_phi_temp.csv → pfas_toolkit/data/ml_phi_temp.csv。"""
+    global _ML_TEMP_CACHE
+    if _ML_TEMP_CACHE is None:
+        fp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "data", "ml_phi_temp.csv")
+        try:
+            t = pd.read_csv(fp)
+            t["_key"] = t["compound"].astype(str).str.strip().str.upper()
+            _ML_TEMP_CACHE = t
+        except Exception:
+            _ML_TEMP_CACHE = pd.DataFrame()
+    return _ML_TEMP_CACHE
 
 
 def make_demo(seed=5):
@@ -182,15 +210,16 @@ def run(df, params, ctx):
     auto = (want == MODEL_AUTO)
     ml_ref = _load_ml_reference()
     run_ml = (auto or want == MODEL_ML) and len(ml_ref) > 0
+    run_mlchain = (auto or want == MODEL_MLCHAIN) and (cn is not None and cls is not None)
     run_koa = (auto or want == MODEL_KOA) and has_koa
     run_jp = (auto or want == MODEL_JP) and (vp is not None and np.isfinite(vp).any())
     run_dual = (auto or want == MODEL_DUAL) and has_koa
     run_steady = (auto or want == MODEL_STEADY) and has_koa
     run_ionic = (auto or want == MODEL_IONIC) and (cn is not None and cls is not None)
     run_lfer = (auto or want == MODEL_LFER) and has_lfer
-    if not any([run_ml, run_koa, run_jp, run_dual, run_steady, run_ionic, run_lfer]):
+    if not any([run_ml, run_mlchain, run_koa, run_jp, run_dual, run_steady, run_ionic, run_lfer]):
         raise ValueError("沒有任何模型可執行。請至少提供：log KOA 欄（KOA/雙模型/穩態），"
-                         "或蒸氣壓 p_L° 欄（Junge–Pankow），或 class＋Cn 欄（離子鏈長式），"
+                         "或蒸氣壓 p_L° 欄（Junge–Pankow），或 class＋Cn 欄（離子鏈長式／ML 鏈長式），"
                          "或 5 個 Abraham 描述符欄（pp-LFER）；或用『ML 參考』比對內建 38 支 PFAS。")
 
     out = pd.DataFrame({"compound": names})
@@ -202,7 +231,18 @@ def run(df, params, ctx):
     if run_ml:
         m = ml_ref.set_index("_key")
         key = pd.Series(names).astype(str).str.strip().str.upper()
-        phi = key.map(m["phi_25C"]).to_numpy(dtype=float)
+        phi = key.map(m["phi_25C"]).to_numpy(dtype=float).copy()   # copy：下面溫度內插要可寫
+        # 溫度內插：≠25°C 時用 ML 溫度曲線（5–35°C；僅 20–25°C 最可信）
+        if abs(temp_c - 25) > 0.5:
+            tt = _load_ml_temp()
+            if len(tt):
+                for i, k in enumerate(key):
+                    if not np.isfinite(phi[i]):
+                        continue
+                    sub = tt[tt["_key"] == k]
+                    if len(sub) >= 2:
+                        phi[i] = float(np.interp(temp_c, sub["temp_C"].to_numpy(), sub["phi"].to_numpy()))
+                ctx.log(f"ML 參考：φ 已內插到 {temp_c}°C（ML 溫度曲線；僅 20–25°C 最可信，兩端為外推）")
         nmatch = int(np.isfinite(phi).sum())
         if nmatch == 0 and want == MODEL_ML:
             raise ValueError("『ML 參考』未對到任何化合物名稱（內建 38 支 PFAS，名稱需相符，"
@@ -267,7 +307,26 @@ def run(df, params, ctx):
         cols_for_heatmap["離子鏈長式"] = phi
         if is_pfca.any():
             ctx.log("⚠ Yamazaki 鏈長式對長鏈 PFCA 會嚴重低估粒相（本專案 ML 與設限實測顯示 "
-                    "C≥10 之 PFCA φ≈0.7–0.9）→ PFCA 建議以『ML 參考』為準（已列為雙軌建議最優先）。")
+                    "C≥10 之 PFCA φ≈0.7–0.9）→ PFCA 建議以『ML 參考』或『ML 鏈長式』為準。")
+
+    # (H) ML 導出鏈長式（各族；Kp m³/µg，可調 TSP；修正並取代 Yamazaki）
+    if run_mlchain:
+        log_kp = np.full(n, np.nan)
+        if cls is not None and cn is not None:
+            for i, c in enumerate(cls):
+                fam = ("PFCA" if ("PFCA" in c or "CARBOX" in c) else
+                       "PFSA" if ("PFSA" in c or "SULFON" in c) else
+                       "FTS" if "FTS" in c else None)
+                if fam in ML_CHAIN_COEF and np.isfinite(cn[i]):
+                    co = ML_CHAIN_COEF[fam]
+                    log_kp[i] = co["slope"] * cn[i] + co["intercept"]
+        phi = _phi(10.0 ** log_kp, tsp)                  # m³/µg, TSP µg/m³（可調）
+        out["MLchain_logKp"] = np.round(log_kp, 3)
+        out["MLchain_phi_particle"] = np.round(phi, 4)
+        if np.isfinite(phi).any():
+            cols_for_heatmap["ML 鏈長式"] = phi
+            ctx.log("ML 鏈長式：各族 log10Kp=slope·Cn+intercept（m³/µg，可調 TSP；"
+                    "PFCA/PFSA 高信心、FTS 低信心）；由 ML φ 反推擬合，已修正 Yamazaki PFCA 低估。")
 
     # (F) pp-LFER（Kp m³/g → TSP 換成 g/m³）
     if run_lfer:
@@ -281,6 +340,7 @@ def run(df, params, ctx):
     rec_phi = np.full(n, np.nan)
     rec_model = np.array(["—"] * n, dtype=object)
     pri = [("ML 參考", "ML_phi_particle"),
+           ("ML 鏈長式", "MLchain_phi_particle"),
            ("離子鏈長式", "Ionic_phi_particle"), ("KOA", "KOA_phi_particle"),
            ("雙模型", "Dual_phi_particle"), ("穩態L-M-Y", "Steady_phi_particle"),
            ("Junge–Pankow", "JP_phi_particle"), ("pp-LFER", "LFER_phi_particle")]
@@ -359,10 +419,12 @@ SPEC = MethodSpec(
             "（離子走鏈長式、中性走 KOA）。",
     params=[
         ParamSpec("model", "模型（模式切換）", "choice", default=MODEL_AUTO,
-                  choices=[MODEL_AUTO, MODEL_ML, MODEL_KOA, MODEL_JP, MODEL_DUAL, MODEL_STEADY, MODEL_IONIC, MODEL_LFER],
-                  help="自動比較＝依你提供的欄位盡量全跑＋內建 ML 參考並輸出比較熱圖（建議）。"
-                       "ML 參考＝本專案內建 38 支 PFAS 的階層貝氏 φ（已驗證基準，含 89% 可信區間，按化合物名比對）。"
-                       "其餘為單一文獻模型；離子型 PFAA 請用 ML 參考/離子鏈長式，勿對離子型硬套 KOA。"),
+                  choices=[MODEL_AUTO, MODEL_ML, MODEL_MLCHAIN, MODEL_KOA, MODEL_JP, MODEL_DUAL,
+                           MODEL_STEADY, MODEL_IONIC, MODEL_LFER],
+                  help="自動比較＝依你提供的欄位盡量全跑＋內建 ML 參考/鏈長式並輸出比較熱圖（建議）。"
+                       "ML 參考＝38 支 PFAS 的貝氏 φ（已驗證基準，含 89% CI，可隨溫度內插）。"
+                       "ML 鏈長式＝由 ML 反推的各族 Kp(Cn)（m³/µg，可調 TSP，PFCA/PFSA 高信心，"
+                       "已修正 Yamazaki PFCA 低估）。離子型勿硬套 KOA。"),
         ParamSpec("id_col", "化合物名稱欄（可空）", "column", default="compound", optional=True),
         ParamSpec("region", "地區（帶入 fom/TSP/θ 預設）", "choice", default="都市 urban",
                   choices=["都市 urban", "背景 background", "偏遠 remote", "自訂 custom"],
