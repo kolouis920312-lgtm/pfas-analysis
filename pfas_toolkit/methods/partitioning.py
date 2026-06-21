@@ -59,6 +59,19 @@ ML_CHAIN_COEF = {
     "FTS":  dict(slope=0.162, intercept=-2.245, r2=0.46, n=3,  conf="低"),
 }
 
+# 各模型實際用到的輸入「變因」（供輸出 vars_used 欄；鍵需與雙軌建議 pri 的標籤一致）
+_MODEL_VARS = {
+    "ML 參考":       "化合物名, 溫度",
+    "ML 鏈長式":     "class, Cn, TSP",
+    "離子鏈長式":    "class, Cn, TSP",
+    "KOA":           "log KOA, fom, TSP",
+    "雙模型":        "log KOA, fom, fEC, Ksa, TSP",
+    "穩態L-M-Y":     "log KOA, fom, TSP, C",
+    "Junge–Pankow":  "p_L°, θ, c",
+    "pp-LFER":       "S/A/B/L/V, TSP",
+    "—":             "—",
+}
+
 _ML_REF_CACHE = None
 _ML_TEMP_CACHE = None
 
@@ -355,6 +368,7 @@ def run(df, params, ctx):
     out["model_best"] = rec_model
     out["dominant_phase"] = np.where(np.isnan(rec_phi), "—",
                               np.where(rec_phi >= 0.5, "粒相 particle", "氣相 gas"))
+    out["vars_used"] = [_MODEL_VARS.get(mm, "—") for mm in rec_model]   # 該支實際用到的變因
     # 建議值若採 ML 參考，附上 89% 可信區間
     if "ML_phi_particle" in out.columns:
         is_ml = (rec_model == "ML 參考")
