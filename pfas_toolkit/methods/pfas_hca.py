@@ -69,6 +69,28 @@ def _clr_center_pct(C_rows):
     return e / e.sum() * 100.0
 
 
+def _agg_fingerprint(method, C_m, Pp_m, sil_m):
+    """一群成員 → 一條代表指紋（線性 %，可餵 CMB/PMF）。
+    C_m: 該群 CLR rows；Pp_m: 該群線性 % rows；sil_m: 該群每筆 silhouette。"""
+    def close(v):
+        s = float(v.sum()); return (v / s * 100.0) if s > 0 else v
+    if method.startswith("CLR"):                 # CLR 幾何中心
+        return _clr_center_pct(C_m)
+    if method.startswith("medoid"):              # 最中心的那一筆樣本
+        if len(C_m) == 1:
+            return Pp_m[0]
+        dd = ((C_m[:, None, :] - C_m[None, :, :]) ** 2).sum(-1)   # 兩兩距離平方
+        return Pp_m[int(dd.sum(1).argmin())]                     # 到其他成員總距離最小者
+    if method.startswith("silhouette"):          # silhouette 加權（邊緣樣本少算）
+        w = np.clip(sil_m, 0, None)
+        if w.sum() <= 0:
+            w = np.ones(len(Pp_m))
+        return close((w[:, None] * Pp_m).sum(0) / w.sum())
+    if method.startswith("等權"):                # 等權算術平均
+        return close(Pp_m.mean(0))
+    return close(np.median(Pp_m, axis=0))        # 預設：中位數（抗離群）
+
+
 def _best_k(Z, silX, silm, ks, fcluster, silhouette_score, tol=0.02):
     """掃 silhouette，回傳『近似最佳中最精簡的 k』：在最高分 tol 內取最小的 k，避免過度切分。
 
@@ -121,13 +143,12 @@ def run(df, params, ctx):
     plt = get_plt(ctx.theme)
     from scipy.spatial.distance import pdist, squareform
     from scipy.cluster.hierarchy import linkage, fcluster, dendrogram, cophenet
-    from sklearn.metrics import silhouette_score
+    from sklearn.metrics import silhouette_score, silhouette_samples
 
     id_col = params.get("id_col") or ""
     filter_col = params.get("filter_col") or ""
     filter_vals = as_list(params.get("filter_values"))
-    paper_col = params.get("paper_col") or ""
-    country_col = params.get("country_col") or ""
+    fp_agg = params.get("fingerprint_agg", "中位數")
     comp_sel = as_list(params.get("compound_cols") or params.get("feature_cols"))
     min_cov = float(params.get("min_coverage", 0.5) or 0)
     dist_opt = params.get("distance", "both")
@@ -147,7 +168,9 @@ def run(df, params, ctx):
     if filter_col and filter_col in d.columns and filter_vals:
         d = apply_value_filter(d, ctx, filter_col, filter_vals, what="樣本")
 
-    meta = {c for c in (id_col, filter_col, paper_col, country_col) if c}
+    META_NAMES = {"category", "categories_all", "country", "paper", "phase", "phase_raw",
+                  "source_file", "n_samples", "true_source", "unit"}
+    meta = {c for c in (id_col, filter_col) if c} | META_NAMES
     if comp_sel:
         comps = [c for c in comp_sel if c in d.columns]
     else:
@@ -213,11 +236,12 @@ def run(df, params, ctx):
         fig.tight_layout(); ctx.save_fig(fig, f"pfas_hca_dendrogram_{tag}")
         return labels
 
+    xtab_cols = list(dict.fromkeys(c for c in ["category", filter_col] if c and c in d.columns))
     def crosstabs(labels, sub, tag):
-        for mc, mname in [(paper_col, "paper"), (country_col, "country")]:
-            if mc and mc in sub.columns:
+        for mc in xtab_cols:                       # 自動對 category（及篩選欄）出群×類別交叉表
+            if mc in sub.columns:
                 ctab = pd.crosstab(pd.Series(labels, name="cluster"), sub[mc].values)
-                ctx.save_table(ctab, f"pfas_hca_crosstab_{mname}_{tag}")
+                ctx.save_table(ctab, f"pfas_hca_crosstab_{mc}_{tag}")
 
     def fp_bar(fp_df, cols, dname, tag):
         fig, ax = plt.subplots(figsize=(12, 5))
@@ -275,16 +299,12 @@ def run(df, params, ctx):
         if len(sub) < 4:
             raise ValueError(f"完整觀測只剩 {len(sub)} 列，無法分群。"
                              "請調低覆蓋率門檻或減少化合物欄，或改用 pairwise 模式。")
-        if paper_col and paper_col in d.columns:
-            dropped = sorted(set(d[paper_col].dropna().astype(str)) -
-                             set(sub[paper_col].dropna().astype(str)))
-            if dropped:
-                ctx.log(f"complete 模式下因測項不全而被完全排除的論文（{len(dropped)} 篇）："
-                        f"{dropped[:20]}{' …' if len(dropped) > 20 else ''} —— 注意覆蓋偏差。")
         P = sub[panel].astype(float)
         Pv = np.clip(P.values, 0.0, None)
         dl = np.array([P[c][P[c] > 0].min() if (P[c] > 0).any() else 1.0 for c in panel])
         C = clr(mult_replacement(Pv, dl, dl_factor))
+        rs = Pv.sum(axis=1, keepdims=True); rs[rs == 0] = 1.0
+        Pp = Pv / rs * 100.0                                   # 線性 % 組成（給指紋聚合）
         tracks = []
         if dist_opt in ("both", "braycurtis"):
             tracks.append("braycurtis")
@@ -306,10 +326,13 @@ def run(df, params, ctx):
                 labels = cluster_plot(Z, cond, C, "euclidean", "CLR-Aitchison", "CLR")
                 tag = "CLR"
             label_cols[f"{tag}_cluster"] = labels
+            sil_s = (silhouette_samples(C, labels) if len(np.unique(labels)) > 1
+                     else np.zeros(len(C)))
             fp = []
             for cl in sorted(np.unique(labels)):
-                p = _clr_center_pct(C[labels == cl])
-                row = {"cluster": int(cl), "n": int((labels == cl).sum())}
+                m = labels == cl
+                p = _agg_fingerprint(fp_agg, C[m], Pp[m], sil_s[m])
+                row = {"cluster": int(cl), "n": int(m.sum())}
                 row.update({panel[j]: round(float(p[j]), 2) for j in range(len(panel))})
                 fp.append(row)
             fp_df = pd.DataFrame(fp)
@@ -320,7 +343,7 @@ def run(df, params, ctx):
 
     lab_out = pd.DataFrame(index=used_sub.index)
     lab_out.index.name = id_col or "sample_id"
-    for mc in (filter_col, paper_col, country_col, "true_source"):
+    for mc in (filter_col, "category", "true_source"):
         if mc and mc in used_sub.columns:
             lab_out[mc] = used_sub[mc].values
     for k, v in label_cols.items():
@@ -331,10 +354,9 @@ def run(df, params, ctx):
     bc_clr = " + ".join(s["distance"] for s in summary_rows)
     return ctx.result(
         summary=f"PFAS 指紋 HCA 完成（{missing_mode} 模式）：核心盤 {len(panel)} 隻、"
-                f"{len(used_sub)} 列、距離 {bc_clr}。群指紋為組成中心"
-                "（complete＝CLR 中心；pairwise＝各化合物實測平均並回報 coverage）。"
-                "請對照 pfas_hca_summary（best_k/silhouette/cophenetic）與 cluster×論文/國家 交叉表："
-                "若某群幾乎只來自同一篇論文或同一套測項，可能是批次/測項效應而非真實來源。沒測值全程未當 0。")
+                f"{len(used_sub)} 列、距離 {bc_clr}。群指紋＝{fp_agg}（線性 %，可餵 CMB/PMF）。"
+                "請對照 pfas_hca_summary（best_k/silhouette/cophenetic）與 cluster×category 交叉表："
+                "若某群幾乎只來自同一類/同一套測項，可能是批次/測項效應而非真實來源。沒測值全程未當 0。")
 
 
 SPEC = MethodSpec(
