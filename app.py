@@ -12,7 +12,7 @@ app.py — PFAS 資料分析工具（Flask 網站版）
 
 正式部署（公開網際網路）：
     gunicorn -w 2 -k gthread -t 600 app:app
-    （或用 Dockerfile / Procfile，見 網站說明.md）
+    （或用 Dockerfile / Procfile，見 docs/網站說明.md）
 
 設計重點
   ‧ 每位使用者上傳的資料各自存成一個 token，互不干擾
