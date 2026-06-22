@@ -139,6 +139,51 @@ def _pairwise_bc(M, min_shared):
     return D, invalid, med
 
 
+def _cluster_palette(labels_arr, cmap_name, plt):
+    """每個群一個穩定顏色（取自分類色盤）。回傳 {cluster_int: hex}，供樹狀圖/熱圖/色帶共用。"""
+    import matplotlib.colors as mcolors
+    uniq = sorted({int(x) for x in labels_arr})
+    cmap = plt.get_cmap(cmap_name)
+    ncol = getattr(cmap, "N", 256)
+    out = {}
+    for i, cl in enumerate(uniq):
+        # 離散色盤（如 tab10，N≤20）逐色取；連續色盤則在 0~1 均分
+        c = cmap(i % ncol) if ncol and ncol <= 20 else cmap(i / max(1, len(uniq) - 1))
+        out[cl] = mcolors.to_hex(c)
+    return out
+
+
+def _text_on(hex_color):
+    """依背景亮度回傳黑或白文字色（讓群編號在色塊上可讀）。"""
+    import matplotlib.colors as mcolors
+    r, g, b = mcolors.to_rgb(hex_color)
+    return "#000000" if (0.299 * r + 0.587 * g + 0.114 * b) > 0.6 else "#ffffff"
+
+
+def _cluster_link_colors(Z, labels_arr, palette, default="#c9ced6"):
+    """產生 dendrogram 的 link_color_func：整個子樹同群就上該群色，跨群的接點用灰色。"""
+    n = len(labels_arr)
+    cache = {}
+
+    def cl_of(node):
+        node = int(node)
+        if node < n:
+            return int(labels_arr[node])
+        if node in cache:
+            return cache[node]
+        a = cl_of(Z[node - n, 0])
+        b = cl_of(Z[node - n, 1])
+        cache[node] = a if a == b else None
+        return cache[node]
+
+    link_cols = {}
+    for i in range(len(Z)):
+        node = n + i
+        c = cl_of(node)
+        link_cols[node] = palette.get(c, default) if c is not None else default
+    return lambda k: link_cols.get(int(k), default)
+
+
 def run(df, params, ctx):
     plt = get_plt(ctx.theme)
     from scipy.spatial.distance import pdist, squareform
@@ -161,8 +206,10 @@ def run(df, params, ctx):
     max_k = int(params.get("max_clusters", 8))
     dl_factor = float(params.get("dl_factor", 0.65))
     cmap_cat = ctx.color("cmap_categorical", "tab10")
+    cmap_seq = ctx.color("cmap_sequential", "viridis")
     primary = ctx.color("primary", "#4682b4")
     accent = ctx.color("accent", "#ff6347")
+    LABEL_MAX = 70   # 樣本數 ≤ 此值：樹狀圖/熱圖直接標 sample_id；超過才折疊（改看成員表）
 
     d = df.copy()
     if filter_col and filter_col in d.columns and filter_vals:
@@ -202,7 +249,7 @@ def run(df, params, ctx):
 
     label_cols, summary_rows = {}, []
 
-    def cluster_plot(Z, cond, silX, silm, dname, tag):
+    def cluster_plot(Z, cond, silX, silm, dname, tag, ids):
         coph, _ = cophenet(Z, cond)
         ks = list(range(2, min(max_k, silX.shape[0] - 1) + 1))
         if auto_k and len(ks) >= 1:
@@ -227,14 +274,33 @@ def run(df, params, ctx):
         ctx.log(f"{dname}：k={bestk}，silhouette={silf:.3f}，cophenetic={coph:.3f}（cophenetic >0.8 樹可信）")
         summary_rows.append({"track": tag, "distance": dname, "best_k": int(bestk),
                              "silhouette": round(float(silf), 3), "cophenetic": round(float(coph), 3)})
-        fig, ax = plt.subplots(figsize=(12, 5))
-        ct = Z[-(bestk - 1), 2] if (bestk > 1 and len(Z) >= bestk) else 0
-        dendrogram(Z, truncate_mode="lastp", p=30, leaf_rotation=90, leaf_font_size=8,
-                   color_threshold=ct, ax=ax)
+        palette = _cluster_palette(labels, cmap_cat, plt)
+        n_obs = len(labels)
+        if n_obs <= LABEL_MAX:
+            # 樣本不多：畫完整樹、葉子標真正 sample_id、整條 link 依所屬群上色
+            fig, ax = plt.subplots(figsize=(min(28, max(12, n_obs * 0.22)), 5))
+            lcf = _cluster_link_colors(Z, labels, palette)
+            R = dendrogram(Z, labels=[str(x) for x in ids], leaf_rotation=90,
+                           leaf_font_size=(8 if n_obs <= 40 else 6),
+                           link_color_func=lcf, ax=ax)
+            for txt, leaf in zip(ax.get_xticklabels(), R["leaves"]):
+                txt.set_color(palette.get(int(labels[leaf]), "#333333"))
+            from matplotlib.patches import Patch
+            handles = [Patch(color=palette[c], label=f"群{c}（n={int((labels == c).sum())}）")
+                       for c in sorted(palette)]
+            ax.legend(handles=handles, fontsize=7, loc="upper right", framealpha=.9, title="分群")
+            ax.set_xlabel("樣本 ID（葉子顏色＝所屬群；同色相鄰＝同一群）")
+        else:
+            # 樣本太多：維持折疊（葉子顯示折疊筆數），完整歸屬改看『各群成員』表與熱圖
+            fig, ax = plt.subplots(figsize=(12, 5))
+            ct = Z[-(bestk - 1), 2] if (bestk > 1 and len(Z) >= bestk) else 0
+            dendrogram(Z, truncate_mode="lastp", p=30, leaf_rotation=90, leaf_font_size=8,
+                       color_threshold=ct, ax=ax)
+            ax.set_xlabel(f"樣本 / 群（樣本>{LABEL_MAX} 已折疊；完整歸屬見『各群成員』表與組成熱圖）")
         ax.set_title(f"PFAS 指紋 HCA 樹狀圖（{dname}，k={bestk}）")
-        ax.set_xlabel("樣本 / 群"); ax.set_ylabel("距離")
+        ax.set_ylabel("距離")
         fig.tight_layout(); ctx.save_fig(fig, f"pfas_hca_dendrogram_{tag}")
-        return labels
+        return labels, palette
 
     xtab_cols = list(dict.fromkeys(c for c in ["category", filter_col] if c and c in d.columns))
     def crosstabs(labels, sub, tag):
@@ -250,6 +316,67 @@ def run(df, params, ctx):
         ax.set_title(f"各群來源指紋（{dname}）"); ax.set_ylabel("組成 %"); ax.set_xlabel("群")
         ax.legend(bbox_to_anchor=(1.01, 1), loc="upper left", fontsize=7)
         fig.tight_layout(); ctx.save_fig(fig, f"pfas_hca_fingerprint_{tag}")
+
+    def members_table(labels, subdf, tag):
+        """各群成員清單（直接回答『哪幾筆同群』）：每群一列＝群號＋筆數＋成員 sample_id，
+        若有 category/來源欄再附該群的類別組成（如『短鏈PFCA主導×35』）。"""
+        arr = np.array([str(x) for x in subdf.index])
+        metac = list(dict.fromkeys(c for c in ("category", "true_source", filter_col)
+                                   if c and c in subdf.columns))
+        rows = []
+        for cl in sorted(np.unique(labels)):
+            m = labels == cl
+            row = {"cluster": int(cl), "n": int(m.sum()), "members": ", ".join(arr[m])}
+            for mc in metac:
+                vc = pd.Series(np.asarray(subdf[mc].values)[m]).value_counts()
+                row[f"{mc}_組成"] = "; ".join(f"{k}×{int(v)}" for k, v in vc.items())
+            rows.append(row)
+        ctx.save_table(pd.DataFrame(rows), f"pfas_hca_members_{tag}", index=False)
+
+    def cluster_heatmap(mat_pct, ids, labels_arr, Zt, dname, tag, palette):
+        """樣本×化合物 組成熱圖：列依樹狀圖葉序排列、左側色帶＝所屬群（同群連續成色塊）。
+        沒測(NaN)顯示為淺灰，與 0（未檢出）區隔。"""
+        import copy as _copy
+        import matplotlib.colors as mcolors
+        order = list(dendrogram(Zt, no_plot=True)["leaves"])
+        Mo = np.asarray(mat_pct, dtype=float)[order]
+        ids_o = [str(ids[i]) for i in order]
+        lab_o = np.asarray(labels_arr)[order]
+        n = len(order)
+        fig, (axc, ax) = plt.subplots(
+            1, 2, figsize=(max(8, 0.5 * len(panel) + 3), max(4.0, min(0.20 * n + 1.5, 22))),
+            gridspec_kw={"width_ratios": [0.5, 12], "wspace": 0.03})
+        # 左側群色帶 + 群號（分群是樹的子樹 → 葉序內同群必連續）
+        strip = np.array([mcolors.to_rgb(palette.get(int(c), "#888888")) for c in lab_o]
+                         ).reshape(n, 1, 3)
+        axc.imshow(strip, aspect="auto")
+        axc.set_xticks([]); axc.set_yticks([])
+        axc.set_ylabel("樣本（依樹狀圖順序）", fontsize=9)
+        prev, start = None, 0
+        for i, c in enumerate(list(lab_o) + [None]):
+            cc = None if c is None else int(c)
+            if cc != prev:
+                if prev is not None:
+                    axc.text(0, (start + i - 1) / 2.0, str(prev), ha="center", va="center",
+                             fontsize=9, fontweight="bold", color=_text_on(palette.get(prev, "#888")))
+                prev, start = cc, i
+        cmap_obj = _copy.copy(plt.get_cmap(cmap_seq))
+        cmap_obj.set_bad("#eef0f3")          # 沒測(NaN) → 淺灰，和 0 區隔
+        im = ax.imshow(np.ma.masked_invalid(Mo), aspect="auto", cmap=cmap_obj)
+        ax.set_xticks(range(len(panel)))
+        ax.set_xticklabels(panel, rotation=90, fontsize=7)
+        if n <= LABEL_MAX:
+            ax.set_yticks(range(n))
+            ax.set_yticklabels(ids_o, fontsize=(7 if n <= 40 else 5))
+            for txt, c in zip(ax.get_yticklabels(), lab_o):
+                txt.set_color(palette.get(int(c), "#333333"))
+        else:
+            ax.set_yticks([])
+        ax.set_title(f"各樣本 PFAS 組成熱圖（{dname}；列依樹狀圖排序、左側色帶＝群）")
+        cb = fig.colorbar(im, ax=ax, fraction=0.025, pad=0.01)
+        cb.set_label("組成 %", fontsize=8)
+        # 不用 tight_layout：colorbar＋雙軸 gridspec 不相容；save_fig 已 bbox_inches="tight" 防裁切
+        ctx.save_fig(fig, f"pfas_hca_heatmap_{tag}")
 
     if missing_mode == "pairwise":
         measured = d[panel].notna().sum(axis=1)
@@ -269,7 +396,8 @@ def run(df, params, ctx):
                     "建議提高覆蓋率門檻改用 complete 模式，或縮小化合物盤。")
         cond = squareform(D)
         Z = linkage(cond, method="average")
-        labels = cluster_plot(Z, cond, D, "precomputed", "Bray–Curtis(pairwise)", "BC")
+        labels, palette = cluster_plot(Z, cond, D, "precomputed", "Bray–Curtis(pairwise)", "BC",
+                                       list(sub.index))
         label_cols["BC_cluster"] = labels
         # 指紋：每群每隻化合物以『實測平均』算組成中心，並回報 coverage（§10）
         fp_rows = []
@@ -291,6 +419,12 @@ def run(df, params, ctx):
         ctx.save_table(fp_df, "pfas_hca_fingerprint_BC", index=False)
         fp_bar(fp_df, panel, "Bray–Curtis(pairwise)；表另含各化合物 coverage", "BC")
         crosstabs(labels, sub, "BC")
+        members_table(labels, sub, "BC")
+        # 熱圖：每列以『該樣本實測項』的占比 %（沒測留 NaN→淺灰，不當 0）
+        Mh = M.astype(float).copy()
+        _rs = np.nansum(Mh, axis=1, keepdims=True); _rs[_rs == 0] = np.nan
+        cluster_heatmap(Mh / _rs * 100.0, list(sub.index), labels, Z,
+                        "Bray–Curtis(pairwise)", "BC", palette)
         used_sub = sub
     else:
         sub = d.dropna(subset=panel, axis=0)
@@ -318,13 +452,15 @@ def run(df, params, ctx):
                 Prop = P.div(rs, axis=0).fillna(0.0)
                 cond = pdist(Prop.values, metric="braycurtis")
                 Z = linkage(cond, method="average")
-                labels = cluster_plot(Z, cond, squareform(cond), "precomputed", "Bray–Curtis", "BC")
-                tag = "BC"
+                labels, palette = cluster_plot(Z, cond, squareform(cond), "precomputed",
+                                               "Bray–Curtis", "BC", list(sub.index))
+                tag, dname = "BC", "Bray–Curtis"
             else:
                 Z = linkage(C, method="ward")
                 cond = pdist(C)
-                labels = cluster_plot(Z, cond, C, "euclidean", "CLR-Aitchison", "CLR")
-                tag = "CLR"
+                labels, palette = cluster_plot(Z, cond, C, "euclidean",
+                                               "CLR-Aitchison", "CLR", list(sub.index))
+                tag, dname = "CLR", "CLR-Aitchison"
             label_cols[f"{tag}_cluster"] = labels
             sil_s = (silhouette_samples(C, labels) if len(np.unique(labels)) > 1
                      else np.zeros(len(C)))
@@ -337,8 +473,10 @@ def run(df, params, ctx):
                 fp.append(row)
             fp_df = pd.DataFrame(fp)
             ctx.save_table(fp_df, f"pfas_hca_fingerprint_{tag}", index=False)
-            fp_bar(fp_df, panel, "CLR-Aitchison" if tag == "CLR" else "Bray–Curtis", tag)
+            fp_bar(fp_df, panel, dname, tag)
             crosstabs(labels, sub, tag)
+            members_table(labels, sub, tag)
+            cluster_heatmap(Pp, list(sub.index), labels, Z, dname, tag, palette)
         used_sub = sub
 
     lab_out = pd.DataFrame(index=used_sub.index)
@@ -355,7 +493,9 @@ def run(df, params, ctx):
     return ctx.result(
         summary=f"PFAS 指紋 HCA 完成（{missing_mode} 模式）：核心盤 {len(panel)} 隻、"
                 f"{len(used_sub)} 列、距離 {bc_clr}。群指紋＝{fp_agg}（線性 %，可餵 CMB/PMF）。"
-                "請對照 pfas_hca_summary（best_k/silhouette/cophenetic）與 cluster×category 交叉表："
+                "想知道『哪幾筆被分在同一群』：①『pfas_hca_members_*』各群成員清單（含每群類別組成）、"
+                "②樹狀圖（樣本不多時葉子＝sample_id、依群上色）、③組成熱圖（列依樹狀圖排序、左側色帶＝群）。"
+                "再對照 pfas_hca_summary（best_k/silhouette/cophenetic）與 cluster×category 交叉表："
                 "若某群幾乎只來自同一類/同一套測項，可能是批次/測項效應而非真實來源。沒測值全程未當 0。")
 
 

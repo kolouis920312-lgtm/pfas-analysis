@@ -487,11 +487,50 @@ function renderResults(res) {
     dl.appendChild(a);
   });
 
+  // 表格內嵌顯示（每個 CSV 直接渲染成 HTML 表，免下載就看得到）
+  renderTables(res.tables);
+
   // 紀錄 + 摘要
   $("#log").textContent =
     (res.log || "") + "\n\n【摘要】\n" + (res.summary || "");
 
   $("#results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// 把每個輸出 CSV 直接畫成 HTML 表格（含下載連結與「僅顯示前 N 列」提示）
+function renderTables(tables) {
+  const box = $("#tables");
+  box.innerHTML = "";
+  if (!tables || !tables.length) {
+    box.innerHTML = `<p class="hint">此方法沒有表格輸出。</p>`;
+    return;
+  }
+  tables.forEach((t) => {
+    const card = document.createElement("div");
+    card.className = "table-block";
+    let html = `<div class="table-cap"><span class="table-name">${escapeHtml(t.name)}</span>`
+      + `<a class="table-dl" href="${t.url}?dl=1">⬇ 下載 CSV</a></div>`;
+    const cols = t.columns || [];
+    const rows = t.rows || [];
+    if (cols.length) {
+      html += `<div class="table-scroll"><table><thead><tr>`;
+      cols.forEach((c) => (html += `<th>${escapeHtml(String(c))}</th>`));
+      html += `</tr></thead><tbody>`;
+      rows.forEach((r) => {
+        html += "<tr>";
+        r.forEach((v) => (html += `<td>${v == null ? "" : escapeHtml(String(v))}</td>`));
+        html += "</tr>";
+      });
+      html += `</tbody></table></div>`;
+      if (t.nrows > rows.length) {
+        html += `<div class="more">… 共 ${t.nrows} 列，僅顯示前 ${rows.length} 列（下載看完整）</div>`;
+      }
+    } else {
+      html += `<p class="hint">（無法預覽此表，請點上方下載）</p>`;
+    }
+    card.innerHTML = html;
+    box.appendChild(card);
+  });
 }
 
 // ───────────────────────────────── 使用說明書（小視窗）

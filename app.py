@@ -247,6 +247,24 @@ def files_to_links(paths, run_id, run_dir):
     return items
 
 
+def tables_to_payload(paths, run_id, run_dir, max_rows=200):
+    """表格：除了 name/url（下載用），另附前 max_rows 列預覽，讓前端直接內嵌顯示（免下載就看得到）。"""
+    items = []
+    for p in paths:
+        rel = os.path.relpath(p, run_dir).replace(os.sep, "/")
+        item = {"name": os.path.basename(p), "url": f"/api/file/{run_id}/{rel}",
+                "columns": [], "rows": [], "nrows": 0}
+        try:
+            tdf = pd.read_csv(p, encoding="utf-8-sig")
+            item["columns"] = [str(c) for c in tdf.columns]
+            item["rows"] = _json_safe_rows(tdf.head(max_rows))
+            item["nrows"] = int(len(tdf))
+        except Exception:
+            pass
+        items.append(item)
+    return items
+
+
 # ───────────────────────────────────────── 路由
 @app.route("/")
 def index():
@@ -373,7 +391,7 @@ def do_run():
         "summary": res.summary,
         "previews": files_to_links(res.previews, run_id, run_dir),
         "figures": files_to_links(res.figures, run_id, run_dir),
-        "tables": files_to_links(res.tables, run_id, run_dir),
+        "tables": tables_to_payload(res.tables, run_id, run_dir),
         "extras": files_to_links(res.extras, run_id, run_dir),
         "interactives": files_to_links(res.interactives, run_id, run_dir),
         "report": report_to_dict(rep),

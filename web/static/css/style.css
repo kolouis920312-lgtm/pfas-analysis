@@ -213,6 +213,35 @@ input[type="color"] {
   white-space: pre-wrap; max-height: 560px; overflow: auto;
 }
 
+/* 表格內嵌顯示（結果區，全寬） */
+.tables-section {
+  background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 18px 20px; margin-top: 16px;
+}
+.tables-section > h3 { margin: 0 0 12px; font-size: 15px; }
+.tables { display: flex; flex-direction: column; gap: 18px; }
+.table-block { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.table-cap {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 12px; background: #f1f5f9; border-bottom: 1px solid var(--line);
+}
+.table-name { font-size: 13px; font-weight: 600; color: var(--ink); word-break: break-all; }
+.table-dl {
+  font-size: 12px; color: var(--primary-dark); text-decoration: none; white-space: nowrap;
+  padding: 4px 10px; border: 1px solid var(--line); border-radius: 7px; background: #fff;
+}
+.table-dl:hover { background: #eef3f8; }
+.table-scroll { overflow-x: auto; max-height: 460px; overflow-y: auto; }
+.table-scroll table { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+.table-scroll th, .table-scroll td {
+  border: 1px solid var(--line); padding: 5px 9px; text-align: left;
+  vertical-align: top; white-space: normal; word-break: break-word; max-width: 560px;
+}
+.table-scroll th {
+  background: #f8fafc; position: sticky; top: 0; white-space: nowrap; z-index: 1;
+}
+.table-block .more { color: var(--muted); font-size: 12px; padding: 6px 12px; }
+
 /* 覆蓋層 */
 .overlay {
   position: fixed; inset: 0; background: rgba(15, 23, 42, .55); z-index: 50;
